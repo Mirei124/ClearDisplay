@@ -6,6 +6,24 @@ struct DisplayMenuView: View {
   @State private var expandedSections: Set<String> = []
   @State private var arrangementExpanded = false
 
+  private var menuContentHeight: CGFloat {
+    var height: CGFloat =
+      210 + CGFloat(controller.displays.count + controller.disconnectedDisplays.count) * 55
+    for display in controller.displays where expandedDisplays.contains(display.stableID) {
+      height += 280
+      if expandedSections.contains("resolution-\(display.stableID)") {
+        let count = DisplayModeCatalog.groupedResolutions(
+          controller.modesByDisplay[display.id] ?? []
+        ).count
+        height += CGFloat(count) * 30 + 35
+      }
+      if expandedSections.contains("refresh-\(display.stableID)") { height += 100 }
+      if expandedSections.contains("color-\(display.stableID)") { height += 250 }
+    }
+    if arrangementExpanded { height += 215 }
+    return height
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack {
@@ -41,7 +59,9 @@ struct DisplayMenuView: View {
           globalControls
         }
       }
-      .frame(maxHeight: max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
+      .frame(
+        height: min(menuContentHeight, max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
+      )
 
       if let error = controller.errorMessage {
         Divider()
@@ -421,14 +441,15 @@ struct DisplayMenuView: View {
         Task { await controller.setHDR(!enabled, for: display.id) }
       }
     }
-    if let profileStatus = controller.profilesByDisplay[display.id], !profileStatus.profiles.isEmpty
-    {
+    let profileStatus = controller.profilesByDisplay[display.id]
+    HStack(spacing: 8) {
+      Text("色彩文件").font(.caption).frame(width: 60, alignment: .leading)
       Menu {
-        ForEach(profileStatus.profiles) { profile in
+        ForEach(profileStatus?.profiles ?? []) { profile in
           Button {
             Task { await controller.setProfile(profile, for: display.id) }
           } label: {
-            if profile.url == profileStatus.currentURL {
+            if profile.url == profileStatus?.currentURL {
               Label(profile.name, systemImage: "checkmark")
             } else {
               Text(profile.name)
@@ -436,19 +457,11 @@ struct DisplayMenuView: View {
           }
         }
       } label: {
-        HStack(spacing: 8) {
-          Text("色彩文件").font(.caption).frame(width: 60, alignment: .leading)
-          HStack {
-            Text(profileStatus.currentName ?? "选择").lineLimit(1)
-            Spacer(minLength: 4)
-            Image(systemName: "chevron.down").font(.caption2)
-          }
-          .padding(.horizontal, 9)
-          .padding(.vertical, 6)
-          .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
-        }
+        Text(profileStatus?.currentName ?? "未读取到当前配置")
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .disabled(busy)
+      .disabled(busy || profileStatus?.profiles.isEmpty != false)
     }
     if !display.isBuiltin, let contrast = controller.contrastByDisplay[display.id],
       contrast.isAdjustable, let value = contrast.value

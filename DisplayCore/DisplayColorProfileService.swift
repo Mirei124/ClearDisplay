@@ -34,9 +34,17 @@ enum DisplayColorProfileService {
     let profiles = installedProfiles(for: uuid)
     let currentURL = currentProfileURL(for: displayID)
     let currentName: String? = {
-      guard let raw = ColorSyncProfileCreateWithDisplayID(displayID) else { return nil }
-      let profile = raw.takeRetainedValue()
-      return ColorSyncProfileCopyDescriptionString(profile)?.takeRetainedValue() as String?
+      if let raw = ColorSyncProfileCreateWithDisplayID(displayID) {
+        let profile = raw.takeRetainedValue()
+        if let description = ColorSyncProfileCopyDescriptionString(profile)?.takeRetainedValue()
+          as String?, !description.isEmpty
+        {
+          return description
+        }
+      }
+      guard let currentURL else { return nil }
+      return profiles.first(where: { $0.url == currentURL })?.name
+        ?? currentURL.deletingPathExtension().lastPathComponent
     }()
     return .init(profiles: profiles, currentURL: currentURL, currentName: currentName)
   }
