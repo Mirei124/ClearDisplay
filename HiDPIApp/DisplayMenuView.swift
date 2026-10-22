@@ -578,8 +578,11 @@ struct DisplayMenuView: View {
   ) -> some View {
     HStack(spacing: 8) {
       Text(title).font(.caption).frame(width: 60, alignment: .leading)
-      Slider(value: value, in: range, step: step, onEditingChanged: onEditingChanged)
-        .disabled(disabled)
+      ContrastSlider(
+        title: title, value: value, range: range, step: step,
+        onEditingChanged: onEditingChanged
+      )
+      .disabled(disabled)
       Text(label).font(.caption.monospacedDigit()).frame(width: 56, alignment: .trailing)
     }
   }
