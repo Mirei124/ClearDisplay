@@ -235,10 +235,10 @@ struct DisplayMenuView: View {
               Spacer()
               Image(systemName: arrangementExpanded ? "chevron.down" : "chevron.right")
             }
+            .padding(9)
             .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
-          .padding(9)
           if arrangementExpanded {
             DisplayArrangementView(
               controller: controller, primaryListExpanded: $primaryListExpanded
@@ -357,10 +357,10 @@ struct DisplayMenuView: View {
           Image(systemName: expanded ? "chevron.down" : "chevron.right")
             .font(.caption2)
         }
+        .padding(9)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .padding(9)
       if expanded {
         VStack(alignment: .leading, spacing: 9, content: content)
           .padding(.horizontal, 9)

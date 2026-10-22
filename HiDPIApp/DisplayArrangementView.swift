@@ -152,10 +152,10 @@ struct DisplayArrangementView: View {
           Image(systemName: primaryListExpanded ? "chevron.down" : "chevron.right")
             .font(.caption2)
         }
+        .padding(9)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .padding(9)
       if primaryListExpanded {
         ForEach(items) { item in
           Button {
