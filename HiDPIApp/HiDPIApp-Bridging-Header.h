@@ -1,0 +1,5 @@
+#include "../DisplayCore/DisplayModeBridge.h"
+#include "../DisplayCore/DisplayBrightnessBridge.h"
+#include "../DisplayCore/DisplayModeCatalog.h"
+#include "../DisplayCore/DisplayConnectionBridge.h"
+#include "../DisplayCore/DisplayColorModeBridge.h"
