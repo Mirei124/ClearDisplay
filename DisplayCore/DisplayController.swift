@@ -52,6 +52,9 @@ final class DisplayController: ObservableObject {
   private let nightShiftService = DisplayNightShiftService()
   private var terminationObserver: NSObjectProtocol?
   private var editingBrightness: Set<CGDirectDisplayID> = []
+  private var pendingBrightness: [CGDirectDisplayID: Double] = [:]
+  private var brightnessTasks: [CGDirectDisplayID: Task<Void, Never>] = [:]
+  private var brightnessWorkerIDs: [CGDirectDisplayID: String] = [:]
   private var editingContrast: Set<CGDirectDisplayID> = []
   private var editingHardwareTemperature: Set<CGDirectDisplayID> = []
   private var pendingDDCContrast: [CGDirectDisplayID: Double] = [:]
@@ -86,6 +89,7 @@ final class DisplayController: ObservableObject {
   }
 
   deinit {
+    for task in brightnessTasks.values { task.cancel() }
     for task in softwareTransferTasks.values { task.cancel() }
     for task in ddcTasks.values { task.cancel() }
     CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback, nil)
@@ -158,6 +162,14 @@ final class DisplayController: ObservableObject {
       )
     }
     let ids = Set(displays.map(\.id))
+    for (id, stableID) in brightnessWorkerIDs {
+      if displays.first(where: { $0.id == id })?.stableID != stableID {
+        brightnessTasks[id]?.cancel()
+        brightnessTasks.removeValue(forKey: id)
+        brightnessWorkerIDs.removeValue(forKey: id)
+        pendingBrightness.removeValue(forKey: id)
+      }
+    }
     for (id, identity) in Array(ddcWorkerIdentities) {
       if displays.first(where: { $0.id == id })?.stableID != identity.stableID {
         cancelDDCWorker(for: id)
@@ -608,28 +620,49 @@ final class DisplayController: ObservableObject {
     if editing {
       editingBrightness.insert(id)
     } else {
-      Task {
-        await setBrightness(for: id)
-        editingBrightness.remove(id)
-      }
+      editingBrightness.remove(id)
+      brightnessDraftChanged(for: id)
     }
   }
 
-  func setBrightness(for id: CGDirectDisplayID) async {
-    guard !isBusy, !busyDisplays.contains(id), let percent = brightnessDrafts[id] else { return }
-    busyDisplays.insert(id)
-    errorMessage = nil
-    let result = await Task.detached(priority: .userInitiated) {
-      DisplayBrightnessService.setPercent(percent, for: id)
-    }.value
-    busyDisplays.remove(id)
-    switch result {
-    case .success(let status):
-      brightnessByDisplay[id] = status
-      brightnessDrafts[id] = status.percent ?? percent
-    case .failure(let error):
-      errorMessage = error.localizedDescription
-      loadBrightness(for: id)
+  func brightnessDraftChanged(for id: CGDirectDisplayID) {
+    guard !isBusy, !busyDisplays.contains(id),
+      let percent = brightnessDrafts[id],
+      let stableID = displays.first(where: { $0.id == id })?.stableID,
+      brightnessByDisplay[id]?.isAdjustable == true
+    else { return }
+    pendingBrightness[id] = percent
+    guard brightnessTasks[id] == nil else { return }
+    brightnessWorkerIDs[id] = stableID
+    brightnessTasks[id] = Task { [weak self] in
+      while let self, !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(40))
+        guard !Task.isCancelled,
+          self.displays.contains(where: { $0.id == id && $0.stableID == stableID }),
+          let next = self.pendingBrightness.removeValue(forKey: id)
+        else { break }
+        let result = await Task.detached(priority: .userInitiated) {
+          DisplayBrightnessService.setPercent(next, for: id)
+        }.value
+        guard self.displays.contains(where: { $0.id == id && $0.stableID == stableID }) else {
+          break
+        }
+        switch result {
+        case .success(let status):
+          self.brightnessByDisplay[id] = status
+          if !self.editingBrightness.contains(id), self.pendingBrightness[id] == nil {
+            self.brightnessDrafts[id] = status.percent ?? next
+          }
+        case .failure(let error):
+          self.errorMessage = error.localizedDescription
+          break
+        }
+      }
+      if self?.brightnessWorkerIDs[id] == stableID {
+        self?.brightnessTasks.removeValue(forKey: id)
+        self?.brightnessWorkerIDs.removeValue(forKey: id)
+        if self?.pendingBrightness[id] != nil { self?.brightnessDraftChanged(for: id) }
+      }
     }
   }
 

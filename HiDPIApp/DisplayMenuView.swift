@@ -41,7 +41,7 @@ struct DisplayMenuView: View {
           globalControls
         }
       }
-      .frame(maxHeight: 650)
+      .frame(maxHeight: max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
 
       if let error = controller.errorMessage {
         Divider()
@@ -131,9 +131,7 @@ struct DisplayMenuView: View {
           }
           resolutionControl(display)
           refreshControl(display)
-          section("显示关系", key: "topology-\(display.stableID)", detail: relationshipLabel(display)) {
-            topologyControls(display)
-          }
+          topologyControls(display)
           section(
             "色彩与图像", key: "color-\(display.stableID)",
             detail: controller.profilesByDisplay[display.id]?.currentName
@@ -443,7 +441,17 @@ struct DisplayMenuView: View {
           }
         }
       } label: {
-        menuRow("色彩文件", icon: "paintpalette", value: profileStatus.currentName ?? "选择")
+        HStack(spacing: 8) {
+          Text("色彩文件").font(.caption).frame(width: 60, alignment: .leading)
+          HStack {
+            Text(profileStatus.currentName ?? "选择").lineLimit(1)
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.down").font(.caption2)
+          }
+          .padding(.horizontal, 9)
+          .padding(.vertical, 6)
+          .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 7))
+        }
       }
       .disabled(busy)
     }
@@ -550,9 +558,13 @@ struct DisplayMenuView: View {
       "亮度",
       value: Binding(
         get: { controller.brightnessDrafts[display.id] ?? status?.percent ?? 50 },
-        set: { controller.brightnessDrafts[display.id] = $0 }
+        set: {
+          controller.brightnessDrafts[display.id] = $0
+          controller.brightnessDraftChanged(for: display.id)
+        }
       ), range: 0...100, step: 1,
-      label: status?.percent.map { "\(Int($0.rounded()))%" } ?? "—",
+      label: (controller.brightnessDrafts[display.id] ?? status?.percent)
+        .map { "\(Int($0.rounded()))%" } ?? "—",
       disabled: status?.isAdjustable != true || controller.busyDisplays.contains(display.id)
         || controller.isBusy,
       onEditingChanged: { controller.brightnessEditingChanged(for: display.id, editing: $0) }
@@ -605,10 +617,6 @@ struct DisplayMenuView: View {
       }
     }
     return distinct
-  }
-
-  private func relationshipLabel(_ display: DisplayInfo) -> String {
-    "\(mirrorLabel(display)) · \(controller.relationships[display.id]?.rotationDegrees ?? 0)°"
   }
 
   private func mirrorLabel(_ display: DisplayInfo) -> String {
