@@ -4,6 +4,7 @@ import SwiftUI
 struct DisplayArrangementView: View {
   @ObservedObject var controller: DisplayController
   @Binding var primaryListExpanded: Bool
+  let onPrimaryExpanded: () -> Void
   @Environment(\.colorScheme) private var colorScheme
   @State private var origins: [CGDirectDisplayID: CGPoint] = [:]
   @State private var primaryID: CGDirectDisplayID = 0
@@ -121,8 +122,8 @@ struct DisplayArrangementView: View {
         }
         .frame(height: 130)
         .accessibilityLabel("拖动显示器方块以排列")
-        primarySelector
       }
+      primarySelector
     }
     .onAppear(perform: reset)
     .onChange(of: controller.layout) { _, updated in
@@ -142,7 +143,10 @@ struct DisplayArrangementView: View {
   private var primarySelector: some View {
     VStack(alignment: .leading, spacing: 9) {
       Button {
-        withAnimation(.easeInOut(duration: 0.18)) { primaryListExpanded.toggle() }
+        withAnimation(.easeInOut(duration: 0.18)) {
+          primaryListExpanded.toggle()
+          if primaryListExpanded { onPrimaryExpanded() }
+        }
       } label: {
         HStack {
           Text("主显示器").font(.caption.weight(.semibold))

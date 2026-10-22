@@ -20,7 +20,6 @@ struct DisplayMenuView: View {
   @Environment(\.colorScheme) private var colorScheme
   @State private var expandedDisplays: Set<String> = []
   @State private var expandedSection: MenuSection?
-  @State private var arrangementExpanded = false
   @State private var primaryListExpanded = false
 
   private var menuContentHeight: CGFloat {
@@ -44,7 +43,7 @@ struct DisplayMenuView: View {
         height += CGFloat(controller.profilesByDisplay[display.id]?.profiles.count ?? 1) * 30
       }
     }
-    if arrangementExpanded {
+    if !controller.layout.isEmpty {
       height += 230
       if primaryListExpanded { height += CGFloat(controller.layout.count) * 30 }
     }
@@ -222,36 +221,10 @@ struct DisplayMenuView: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
       if !controller.layout.isEmpty {
-        VStack(alignment: .leading, spacing: 9) {
-          Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-              arrangementExpanded.toggle()
-              expandedSection = nil
-              if !arrangementExpanded { primaryListExpanded = false }
-            }
-          } label: {
-            HStack {
-              Text("显示器排列与主屏")
-              Spacer()
-              Image(systemName: arrangementExpanded ? "chevron.down" : "chevron.right")
-            }
-            .padding(9)
-            .contentShape(Rectangle())
-          }
-          .buttonStyle(.plain)
-          if arrangementExpanded {
-            DisplayArrangementView(
-              controller: controller, primaryListExpanded: $primaryListExpanded
-            )
-            .padding(.horizontal, 9)
-            .padding(.bottom, 9)
-          }
-        }
-        .background(
-          arrangementExpanded ? Color.white : Color.secondary.opacity(0.1),
-          in: RoundedRectangle(cornerRadius: 8)
+        DisplayArrangementView(
+          controller: controller, primaryListExpanded: $primaryListExpanded,
+          onPrimaryExpanded: { expandedSection = nil }
         )
-        .environment(\.colorScheme, arrangementExpanded ? .light : colorScheme)
       }
       HStack(spacing: 8) {
         appearanceTile
@@ -702,7 +675,6 @@ struct DisplayMenuView: View {
 
   private func toggleSection(_ key: MenuSection) {
     withAnimation(.easeInOut(duration: 0.18)) {
-      arrangementExpanded = false
       primaryListExpanded = false
       if case .profile(let id) = key, expandedSection == key {
         expandedSection = .color(id)
