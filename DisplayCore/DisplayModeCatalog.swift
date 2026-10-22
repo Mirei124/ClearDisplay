@@ -74,8 +74,9 @@ enum DisplayModeCatalog {
     }
   }
 
-  static func groupedResolutions(_ modes: [DisplayModeOption]) -> [ResolutionKey] {
-    Array(Set(modes.filter(\.isSelectable).map(\.resolutionKey))).sorted()
+  static func desktopResolutions(_ modes: [DisplayModeOption], hiDPI: Bool) -> [ResolutionKey] {
+    Array(Set(modes.filter { $0.isSelectable && $0.isHiDPI == hiDPI }.map(\.resolutionKey)))
+      .sorted()
   }
 
   /// ClearDisplay's contextual recommendation keeps the current desktop size

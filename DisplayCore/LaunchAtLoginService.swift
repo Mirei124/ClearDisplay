@@ -17,15 +17,15 @@ enum LaunchAtLoginService {
     case .requiresApproval:
       return .init(
         isEnabled: false, isAvailable: true,
-        reason: "Allow ClearDisplay in System Settings → General → Login Items.")
+        reason: "请在系统设置 → 通用 → 登录项中允许 ClearDisplay。")
     case .notFound:
       return .init(
         isEnabled: false, isAvailable: false,
-        reason: "Move ClearDisplay to Applications before enabling launch at login.")
+        reason: "请先将 ClearDisplay.app 移到“应用程序”文件夹，再开启开机自启动。")
     @unknown default:
       return .init(
         isEnabled: false, isAvailable: false,
-        reason: "The launch-at-login state is unavailable.")
+        reason: "当前无法读取开机自启动状态。")
     }
   }
 

@@ -12,15 +12,20 @@ struct DisplayMenuView: View {
     for display in controller.displays where expandedDisplays.contains(display.stableID) {
       height += 280
       if expandedSections.contains("resolution-\(display.stableID)") {
-        let count = DisplayModeCatalog.groupedResolutions(
-          controller.modesByDisplay[display.id] ?? []
-        ).count
-        height += CGFloat(count) * 30 + 35
+        let modes = controller.modesByDisplay[display.id] ?? []
+        let density = modes.first(where: \.isCurrent)?.isHiDPI ?? display.hiDPIEnabled
+        let count = DisplayModeCatalog.desktopResolutions(modes, hiDPI: density).count
+        height += CGFloat(count) * 30
       }
       if expandedSections.contains("refresh-\(display.stableID)") { height += 100 }
+      if expandedSections.contains("rotation-\(display.stableID)") { height += 125 }
+      if expandedSections.contains("mirror-\(display.stableID)") {
+        height += CGFloat(controller.displays.count) * 30
+      }
       if expandedSections.contains("color-\(display.stableID)") { height += 250 }
     }
     if arrangementExpanded { height += 215 }
+    if controller.launchAtLoginStatus.reason != nil { height += 22 }
     return height
   }
 
@@ -230,6 +235,10 @@ struct DisplayMenuView: View {
       ) {
         controller.setLaunchAtLogin(!controller.launchAtLoginEnabled)
       }
+      .help(controller.launchAtLoginStatus.reason ?? "开机后自动启动 ClearDisplay")
+      if let reason = controller.launchAtLoginStatus.reason {
+        Text(reason).font(.caption2).foregroundStyle(.secondary)
+      }
     }
     .padding(16)
   }
@@ -320,37 +329,31 @@ struct DisplayMenuView: View {
   private func resolutionControl(_ display: DisplayInfo) -> some View {
     let modes = controller.modesByDisplay[display.id] ?? []
     let current = modes.first(where: \.isCurrent)
-    let resolutions = DisplayModeCatalog.groupedResolutions(modes)
+    let resolutions = DisplayModeCatalog.desktopResolutions(
+      modes, hiDPI: current?.isHiDPI ?? display.hiDPIEnabled)
     let recommendation = DisplayModeCatalog.recommendedResolution(modes)
     let key = "resolution-\(display.stableID)"
     return section("分辨率", key: key, detail: current.map { resolutionLabel($0.resolutionKey) }) {
-      ForEach([true, false], id: \.self) { hiDPI in
-        let choices = resolutions.filter { $0.isHiDPI == hiDPI }
-        if !choices.isEmpty {
-          Text(hiDPI ? "HiDPI" : "非 HiDPI")
-            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-          ForEach(choices, id: \.self) { resolution in
-            let options = DisplayModeCatalog.refreshChoices(for: resolution, in: modes)
-            if let mode = preferredMode(options, current: current) {
-              Button {
-                Task { await controller.setMode(mode, for: display.id) }
-              } label: {
-                HStack {
-                  Text("\(resolution == recommendation ? "★ " : "")\(resolutionLabel(resolution))")
-                  Spacer()
-                  Text(
-                    resolutionDetail(
-                      resolution, mode: mode, current: current,
-                      recommended: recommendation)
-                  )
-                  .font(.caption2).foregroundStyle(.secondary)
-                }
-              }
-              .buttonStyle(.plain)
-              .padding(.vertical, 3)
-              .disabled(controller.isBusy)
+      ForEach(resolutions, id: \.self) { resolution in
+        let options = DisplayModeCatalog.refreshChoices(for: resolution, in: modes)
+        if let mode = preferredMode(options, current: current) {
+          Button {
+            Task { await controller.setMode(mode, for: display.id) }
+          } label: {
+            HStack {
+              Text("\(resolution == recommendation ? "★ " : "")\(resolutionLabel(resolution))")
+              Spacer()
+              Text(
+                resolutionDetail(
+                  resolution, mode: mode, current: current,
+                  recommended: recommendation)
+              )
+              .font(.caption2).foregroundStyle(.secondary)
             }
           }
+          .buttonStyle(.plain)
+          .padding(.vertical, 3)
+          .disabled(controller.isBusy)
         }
       }
     }
@@ -383,32 +386,42 @@ struct DisplayMenuView: View {
   private func topologyControls(_ display: DisplayInfo) -> some View {
     let relationship = controller.relationships[display.id]
     return VStack(alignment: .leading, spacing: 9) {
-      Menu {
+      section(
+        "旋转", key: "rotation-\(display.stableID)",
+        detail: "\(relationship?.rotationDegrees ?? 0)°"
+      ) {
         ForEach(DisplayTopologyService.candidateRotations, id: \.self) { degrees in
           Button {
             Task { await controller.setRotation(degrees, for: display.id) }
           } label: {
-            if relationship?.rotationDegrees == degrees {
-              Label("\(degrees)°", systemImage: "checkmark")
-            } else {
+            HStack {
               Text("\(degrees)°")
+              Spacer()
+              if relationship?.rotationDegrees == degrees {
+                Image(systemName: "checkmark").foregroundStyle(.secondary)
+              }
             }
           }
+          .buttonStyle(.plain)
+          .padding(.vertical, 3)
+          .disabled(controller.isBusy || relationship == nil)
         }
-      } label: {
-        menuRow("旋转", icon: "rotate.right", value: "\(relationship?.rotationDegrees ?? 0)°")
       }
-      .disabled(controller.isBusy || relationship == nil)
-      Menu {
+      section("镜像", key: "mirror-\(display.stableID)", detail: mirrorLabel(display)) {
         Button {
           Task { await controller.setMirror(source: nil, for: display.id) }
         } label: {
-          if relationship?.mirrorsDisplayID == nil {
-            Label("扩展桌面", systemImage: "checkmark")
-          } else {
+          HStack {
             Text("扩展桌面")
+            Spacer()
+            if relationship?.mirrorsDisplayID == nil {
+              Image(systemName: "checkmark").foregroundStyle(.secondary)
+            }
           }
         }
+        .buttonStyle(.plain)
+        .padding(.vertical, 3)
+        .disabled(controller.isBusy || controller.displays.count < 2)
         ForEach(
           controller.displays.filter {
             $0.id != display.id && controller.relationships[$0.id]?.mirrorsDisplayID == nil
@@ -417,17 +430,19 @@ struct DisplayMenuView: View {
           Button {
             Task { await controller.setMirror(source: source.id, for: display.id) }
           } label: {
-            if relationship?.mirrorsDisplayID == source.id {
-              Label("镜像 \(source.name)", systemImage: "checkmark")
-            } else {
+            HStack {
               Text("镜像 \(source.name)")
+              Spacer()
+              if relationship?.mirrorsDisplayID == source.id {
+                Image(systemName: "checkmark").foregroundStyle(.secondary)
+              }
             }
           }
+          .buttonStyle(.plain)
+          .padding(.vertical, 3)
+          .disabled(controller.isBusy || controller.displays.count < 2)
         }
-      } label: {
-        menuRow("镜像", icon: "rectangle.on.rectangle", value: mirrorLabel(display))
       }
-      .disabled(controller.isBusy || controller.displays.count < 2)
     }
   }
 
@@ -580,17 +595,6 @@ struct DisplayMenuView: View {
     .help(status?.unavailableReason ?? "调节显示器亮度")
   }
 
-  private func menuRow(_ title: String, icon: String, value: String) -> some View {
-    HStack(spacing: 8) {
-      Image(systemName: icon).frame(width: 18)
-      Text(title)
-      Spacer()
-      Text(value).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-      Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
-    }
-    .contentShape(Rectangle())
-  }
-
   private func resolutionDetail(
     _ key: ResolutionKey, mode: DisplayModeOption,
     current: DisplayModeOption?, recommended: ResolutionKey?
@@ -633,18 +637,26 @@ struct DisplayMenuView: View {
   }
 
   private func toggleExpansion(_ id: String) {
-    if expandedDisplays.contains(id) {
-      expandedDisplays.remove(id)
-    } else {
-      expandedDisplays.insert(id)
+    var transaction = Transaction(animation: nil)
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      if expandedDisplays.contains(id) {
+        expandedDisplays.remove(id)
+      } else {
+        expandedDisplays.insert(id)
+      }
     }
   }
 
   private func toggleSection(_ key: String) {
-    if expandedSections.contains(key) {
-      expandedSections.remove(key)
-    } else {
-      expandedSections.insert(key)
+    var transaction = Transaction(animation: nil)
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      if expandedSections.contains(key) {
+        expandedSections.remove(key)
+      } else {
+        expandedSections.insert(key)
+      }
     }
   }
 
