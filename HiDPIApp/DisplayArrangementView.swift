@@ -27,19 +27,11 @@ struct DisplayArrangementView: View {
     VStack(alignment: .leading, spacing: 8) {
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 8) {
-          Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-              arrangementExpanded.toggle()
-              if arrangementExpanded { onArrangementExpanded() }
-            }
-          } label: {
+          Button(action: toggleArrangement) {
             HStack(spacing: 8) {
               Text("排列显示器").font(.subheadline.weight(.semibold))
-              Image(systemName: arrangementExpanded ? "chevron.down" : "chevron.right")
-                .font(.caption2)
               Spacer(minLength: 0)
             }
-            .padding(.vertical, 9)
             .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
@@ -51,9 +43,17 @@ struct DisplayArrangementView: View {
             }
             .disabled(!hasChanges || controller.isBusy)
           }
+          Button(action: toggleArrangement) {
+            Image(systemName: arrangementExpanded ? "chevron.down" : "chevron.right")
+              .font(.caption2)
+              .frame(width: 20, height: 20)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 9)
+        .padding(.vertical, 9)
         if arrangementExpanded {
           arrangementContent
             .padding(.horizontal, 9)
@@ -79,6 +79,13 @@ struct DisplayArrangementView: View {
       } else {
         reset()
       }
+    }
+  }
+
+  private func toggleArrangement() {
+    withAnimation(.easeInOut(duration: 0.18)) {
+      arrangementExpanded.toggle()
+      if arrangementExpanded { onArrangementExpanded() }
     }
   }
 

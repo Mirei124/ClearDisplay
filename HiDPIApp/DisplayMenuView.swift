@@ -67,6 +67,7 @@ struct DisplayMenuView: View {
           globalControls
         }
         .frame(width: 390)
+        .fixedSize(horizontal: false, vertical: true)
         .background {
           GeometryReader { geometry in
             Color.clear.preference(key: MenuContentHeightKey.self, value: geometry.size.height)
