@@ -3,7 +3,9 @@ import SwiftUI
 
 struct DisplayArrangementView: View {
   @ObservedObject var controller: DisplayController
+  @Binding var arrangementExpanded: Bool
   @Binding var primaryListExpanded: Bool
+  let onArrangementExpanded: () -> Void
   let onPrimaryExpanded: () -> Void
   @Environment(\.colorScheme) private var colorScheme
   @State private var origins: [CGDirectDisplayID: CGPoint] = [:]
@@ -23,106 +25,46 @@ struct DisplayArrangementView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 8) {
-        Text("排列显示器").font(.subheadline.weight(.semibold))
-        Spacer()
-        Button("重置") { reset() }
-          .disabled(!hasChanges || controller.isBusy)
-        Button("应用排列") {
-          Task { await controller.applyLayout(origins: origins, primaryID: primaryID) }
-        }
-        .disabled(!hasChanges || controller.isBusy)
-      }
-      .buttonStyle(.borderless)
-      if items.count < 2 {
-        Text("连接两台或更多扩展显示器后可调整排列。")
-          .font(.caption).foregroundStyle(.secondary)
-      } else if items.contains(where: { controller.relationships[$0.id]?.mirrorsDisplayID != nil })
-      {
-        Text("请先结束镜像，再调整排列。")
-          .font(.caption).foregroundStyle(.secondary)
-      } else {
-        GeometryReader { geometry in
-          let bounds = dragBounds ?? layoutBounds
-          let scale = min(
-            (geometry.size.width - 24) / max(bounds.width, 1),
-            (geometry.size.height - 24) / max(bounds.height, 1))
-          ZStack(alignment: .topLeading) {
-            if let verticalGuide {
-              Rectangle()
-                .fill(Color.accentColor.opacity(0.7))
-                .frame(width: 1, height: geometry.size.height)
-                .offset(x: (verticalGuide - bounds.minX) * scale + 12)
-                .allowsHitTesting(false)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
+          Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+              arrangementExpanded.toggle()
+              if arrangementExpanded { onArrangementExpanded() }
             }
-            if let horizontalGuide {
-              Rectangle()
-                .fill(Color.accentColor.opacity(0.7))
-                .frame(width: geometry.size.width, height: 1)
-                .offset(y: (horizontalGuide - bounds.minY) * scale + 12)
-                .allowsHitTesting(false)
+          } label: {
+            HStack(spacing: 8) {
+              Text("排列显示器").font(.subheadline.weight(.semibold))
+              Image(systemName: arrangementExpanded ? "chevron.down" : "chevron.right")
+                .font(.caption2)
+              Spacer(minLength: 0)
             }
-            ForEach(items) { item in
-              let origin = origins[item.id] ?? item.origin
-              let name = controller.displays.first(where: { $0.id == item.id })?.name ?? "显示器"
-              RoundedRectangle(cornerRadius: 6)
-                .fill(
-                  item.id == primaryID
-                    ? Color.accentColor.opacity(0.23) : Color.secondary.opacity(0.16)
-                )
-                .overlay {
-                  VStack(spacing: 2) {
-                    Text(name).lineLimit(1)
-                    if item.id == primaryID { Text("主显示器").font(.caption2) }
-                  }
-                  .font(.caption)
-                  .padding(4)
-                }
-                .overlay(
-                  RoundedRectangle(cornerRadius: 6).strokeBorder(
-                    item.id == primaryID ? Color.accentColor : Color.secondary)
-                )
-                .frame(
-                  width: max(item.size.width * scale, 42), height: max(item.size.height * scale, 28)
-                )
-                .position(
-                  x: (origin.x - bounds.minX + item.size.width / 2) * scale + 12,
-                  y: (origin.y - bounds.minY + item.size.height / 2) * scale + 12
-                )
-                .gesture(
-                  DragGesture(minimumDistance: 2)
-                    .onChanged { value in
-                      if draggingID == nil {
-                        draggingID = item.id
-                        dragStartOrigin = origins[item.id] ?? item.origin
-                        dragScale = scale
-                        dragBounds = bounds
-                      }
-                      guard draggingID == item.id, !controller.isBusy else { return }
-                      let start = dragStartOrigin ?? item.origin
-                      let initialScale = dragScale ?? scale
-                      let proposed = CGPoint(
-                        x: start.x + (value.translation.width / initialScale).rounded(),
-                        y: start.y + (value.translation.height / initialScale).rounded())
-                      let snapped = snap(item: item, proposed: proposed, scale: initialScale)
-                      origins[item.id] = snapped.origin
-                      verticalGuide = snapped.verticalGuide
-                      horizontalGuide = snapped.horizontalGuide
-                    }
-                    .onEnded { _ in
-                      draggingID = nil
-                      dragStartOrigin = nil
-                      dragScale = nil
-                      dragBounds = nil
-                      verticalGuide = nil
-                      horizontalGuide = nil
-                    })
+            .padding(.vertical, 9)
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          if arrangementExpanded {
+            Button("重置") { reset() }
+              .disabled(!hasChanges || controller.isBusy)
+            Button("应用排列") {
+              Task { await controller.applyLayout(origins: origins, primaryID: primaryID) }
             }
+            .disabled(!hasChanges || controller.isBusy)
           }
         }
-        .frame(height: 130)
-        .accessibilityLabel("拖动显示器方块以排列")
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 9)
+        if arrangementExpanded {
+          arrangementContent
+            .padding(.horizontal, 9)
+            .padding(.bottom, 9)
+        }
       }
+      .background(
+        arrangementExpanded ? Color.white : Color.secondary.opacity(0.1),
+        in: RoundedRectangle(cornerRadius: 8)
+      )
+      .environment(\.colorScheme, arrangementExpanded ? .light : colorScheme)
       primarySelector
     }
     .onAppear(perform: reset)
@@ -137,6 +79,98 @@ struct DisplayArrangementView: View {
       } else {
         reset()
       }
+    }
+  }
+
+  @ViewBuilder
+  private var arrangementContent: some View {
+    if items.count < 2 {
+      Text("连接两台或更多扩展显示器后可调整排列。")
+        .font(.caption).foregroundStyle(.secondary)
+    } else if items.contains(where: { controller.relationships[$0.id]?.mirrorsDisplayID != nil }) {
+      Text("请先结束镜像，再调整排列。")
+        .font(.caption).foregroundStyle(.secondary)
+    } else {
+      GeometryReader { geometry in
+        let bounds = dragBounds ?? layoutBounds
+        let scale = min(
+          (geometry.size.width - 24) / max(bounds.width, 1),
+          (geometry.size.height - 24) / max(bounds.height, 1))
+        ZStack(alignment: .topLeading) {
+          if let verticalGuide {
+            Rectangle()
+              .fill(Color.accentColor.opacity(0.7))
+              .frame(width: 1, height: geometry.size.height)
+              .offset(x: (verticalGuide - bounds.minX) * scale + 12)
+              .allowsHitTesting(false)
+          }
+          if let horizontalGuide {
+            Rectangle()
+              .fill(Color.accentColor.opacity(0.7))
+              .frame(width: geometry.size.width, height: 1)
+              .offset(y: (horizontalGuide - bounds.minY) * scale + 12)
+              .allowsHitTesting(false)
+          }
+          ForEach(items) { item in
+            let origin = origins[item.id] ?? item.origin
+            let name = controller.displays.first(where: { $0.id == item.id })?.name ?? "显示器"
+            RoundedRectangle(cornerRadius: 6)
+              .fill(
+                item.id == primaryID
+                  ? Color.accentColor.opacity(0.23) : Color.secondary.opacity(0.16)
+              )
+              .overlay {
+                VStack(spacing: 2) {
+                  Text(name).lineLimit(1)
+                  if item.id == primaryID { Text("主显示器").font(.caption2) }
+                }
+                .font(.caption)
+                .padding(4)
+              }
+              .overlay(
+                RoundedRectangle(cornerRadius: 6).strokeBorder(
+                  item.id == primaryID ? Color.accentColor : Color.secondary)
+              )
+              .frame(
+                width: max(item.size.width * scale, 42), height: max(item.size.height * scale, 28)
+              )
+              .position(
+                x: (origin.x - bounds.minX + item.size.width / 2) * scale + 12,
+                y: (origin.y - bounds.minY + item.size.height / 2) * scale + 12
+              )
+              .gesture(
+                DragGesture(minimumDistance: 2)
+                  .onChanged { value in
+                    if draggingID == nil {
+                      draggingID = item.id
+                      dragStartOrigin = origins[item.id] ?? item.origin
+                      dragScale = scale
+                      dragBounds = bounds
+                    }
+                    guard draggingID == item.id, !controller.isBusy else { return }
+                    let start = dragStartOrigin ?? item.origin
+                    let initialScale = dragScale ?? scale
+                    let proposed = CGPoint(
+                      x: start.x + (value.translation.width / initialScale).rounded(),
+                      y: start.y + (value.translation.height / initialScale).rounded())
+                    let snapped = snap(item: item, proposed: proposed, scale: initialScale)
+                    origins[item.id] = snapped.origin
+                    verticalGuide = snapped.verticalGuide
+                    horizontalGuide = snapped.horizontalGuide
+                  }
+                  .onEnded { _ in
+                    draggingID = nil
+                    dragStartOrigin = nil
+                    dragScale = nil
+                    dragBounds = nil
+                    verticalGuide = nil
+                    horizontalGuide = nil
+                  })
+          }
+        }
+      }
+      .frame(height: 130)
+      .accessibilityLabel("拖动显示器方块以排列")
     }
   }
 
