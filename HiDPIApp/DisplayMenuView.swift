@@ -209,23 +209,36 @@ struct DisplayMenuView: View {
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
       if !controller.layout.isEmpty {
-        Button {
-          arrangementExpanded.toggle()
-        } label: {
-          HStack {
-            Text("显示器排列与主屏")
-            Spacer()
-            Image(systemName: arrangementExpanded ? "chevron.down" : "chevron.right")
+        VStack(alignment: .leading, spacing: 9) {
+          Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+              arrangementExpanded.toggle()
+              expandedSections.removeAll()
+              if !arrangementExpanded { primaryListExpanded = false }
+            }
+          } label: {
+            HStack {
+              Text("显示器排列与主屏")
+              Spacer()
+              Image(systemName: arrangementExpanded ? "chevron.down" : "chevron.right")
+            }
+            .contentShape(Rectangle())
           }
-          .contentShape(Rectangle())
+          .buttonStyle(.plain)
+          .padding(9)
+          if arrangementExpanded {
+            DisplayArrangementView(
+              controller: controller, primaryListExpanded: $primaryListExpanded
+            )
+            .padding(.horizontal, 9)
+            .padding(.bottom, 9)
+          }
         }
-        .buttonStyle(.plain)
-        .padding(9)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-        if arrangementExpanded {
-          DisplayArrangementView(
-            controller: controller, primaryListExpanded: $primaryListExpanded)
-        }
+        .background(
+          arrangementExpanded ? Color.white : Color.secondary.opacity(0.1),
+          in: RoundedRectangle(cornerRadius: 8)
+        )
+        .environment(\.colorScheme, arrangementExpanded ? .light : colorScheme)
       }
       HStack(spacing: 8) {
         appearanceTile
@@ -676,10 +689,19 @@ struct DisplayMenuView: View {
 
   private func toggleSection(_ key: String) {
     withAnimation(.easeInOut(duration: 0.18)) {
-      if expandedSections.contains(key) {
-        expandedSections.remove(key)
+      arrangementExpanded = false
+      primaryListExpanded = false
+      if key.hasPrefix("profile-") {
+        let colorKey = "color-" + key.dropFirst("profile-".count)
+        if expandedSections.contains(key) {
+          expandedSections = [colorKey]
+        } else {
+          expandedSections = [colorKey, key]
+        }
+      } else if expandedSections.contains(key) {
+        expandedSections.removeAll()
       } else {
-        expandedSections.insert(key)
+        expandedSections = [key]
       }
     }
   }
