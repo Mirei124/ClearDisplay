@@ -8,6 +8,9 @@ struct DisplayArrangementView: View {
   @State private var draggingID: CGDirectDisplayID?
   @State private var dragStartOrigin: CGPoint?
   @State private var dragScale: CGFloat?
+  @State private var dragBounds: CGRect?
+  @State private var verticalGuide: CGFloat?
+  @State private var horizontalGuide: CGFloat?
 
   private var items: [DisplayLayoutItem] { controller.layout }
   private var hasChanges: Bool {
@@ -34,11 +37,25 @@ struct DisplayArrangementView: View {
           .font(.caption).foregroundStyle(.secondary)
       } else {
         GeometryReader { geometry in
-          let bounds = layoutBounds
+          let bounds = dragBounds ?? layoutBounds
           let scale = min(
             (geometry.size.width - 24) / max(bounds.width, 1),
             (geometry.size.height - 24) / max(bounds.height, 1))
           ZStack(alignment: .topLeading) {
+            if let verticalGuide {
+              Rectangle()
+                .fill(Color.accentColor.opacity(0.7))
+                .frame(width: 1, height: geometry.size.height)
+                .offset(x: (verticalGuide - bounds.minX) * scale + 12)
+                .allowsHitTesting(false)
+            }
+            if let horizontalGuide {
+              Rectangle()
+                .fill(Color.accentColor.opacity(0.7))
+                .frame(width: geometry.size.width, height: 1)
+                .offset(y: (horizontalGuide - bounds.minY) * scale + 12)
+                .allowsHitTesting(false)
+            }
             ForEach(items) { item in
               let origin = origins[item.id] ?? item.origin
               let name = controller.displays.first(where: { $0.id == item.id })?.name ?? "显示器"
@@ -73,18 +90,26 @@ struct DisplayArrangementView: View {
                         draggingID = item.id
                         dragStartOrigin = origins[item.id] ?? item.origin
                         dragScale = scale
+                        dragBounds = bounds
                       }
                       guard draggingID == item.id, !controller.isBusy else { return }
                       let start = dragStartOrigin ?? item.origin
                       let initialScale = dragScale ?? scale
-                      origins[item.id] = CGPoint(
+                      let proposed = CGPoint(
                         x: start.x + (value.translation.width / initialScale).rounded(),
                         y: start.y + (value.translation.height / initialScale).rounded())
+                      let snapped = snap(item: item, proposed: proposed, scale: initialScale)
+                      origins[item.id] = snapped.origin
+                      verticalGuide = snapped.verticalGuide
+                      horizontalGuide = snapped.horizontalGuide
                     }
                     .onEnded { _ in
                       draggingID = nil
                       dragStartOrigin = nil
                       dragScale = nil
+                      dragBounds = nil
+                      verticalGuide = nil
+                      horizontalGuide = nil
                     })
             }
           }
@@ -118,7 +143,50 @@ struct DisplayArrangementView: View {
     }
   }
 
+  private func snap(item: DisplayLayoutItem, proposed: CGPoint, scale: CGFloat)
+    -> (origin: CGPoint, verticalGuide: CGFloat?, horizontalGuide: CGFloat?)
+  {
+    let moving = CGRect(origin: proposed, size: item.size)
+    let threshold = 8 / max(scale, 0.001)
+    var xMatch: (distance: CGFloat, offset: CGFloat, guide: CGFloat)?
+    var yMatch: (distance: CGFloat, offset: CGFloat, guide: CGFloat)?
+    for other in items where other.id != item.id {
+      let target = CGRect(origin: origins[other.id] ?? other.origin, size: other.size)
+      if moving.maxY >= target.minY - threshold && moving.minY <= target.maxY + threshold {
+        for (source, destination) in [
+          (moving.minX, target.minX), (moving.midX, target.midX),
+          (moving.maxX, target.maxX), (moving.minX, target.maxX),
+          (moving.maxX, target.minX),
+        ] {
+          let distance = abs(destination - source)
+          if distance <= threshold && distance < (xMatch?.distance ?? .infinity) {
+            xMatch = (distance, destination - source, destination)
+          }
+        }
+      }
+      if moving.maxX >= target.minX - threshold && moving.minX <= target.maxX + threshold {
+        for (source, destination) in [
+          (moving.minY, target.minY), (moving.midY, target.midY),
+          (moving.maxY, target.maxY), (moving.minY, target.maxY),
+          (moving.maxY, target.minY),
+        ] {
+          let distance = abs(destination - source)
+          if distance <= threshold && distance < (yMatch?.distance ?? .infinity) {
+            yMatch = (distance, destination - source, destination)
+          }
+        }
+      }
+    }
+    return (
+      CGPoint(x: proposed.x + (xMatch?.offset ?? 0), y: proposed.y + (yMatch?.offset ?? 0)),
+      xMatch?.guide, yMatch?.guide
+    )
+  }
+
   private func reset() {
+    dragBounds = nil
+    verticalGuide = nil
+    horizontalGuide = nil
     origins = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.origin) })
     primaryID = items.first(where: \.isMain)?.id ?? 0
   }
