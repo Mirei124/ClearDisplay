@@ -110,7 +110,18 @@ final class DisplayController: ObservableObject {
     }
     let count = HDReadDisplays(nil, 0)
     guard count > 0 else {
+      cancelAllBrightnessWorkers()
       cancelAllDDCWorkers()
+      for task in softwareTransferTasks.values { task.cancel() }
+      softwareTransferTasks.removeAll()
+      brightnessDrafts.removeAll()
+      contrastDrafts.removeAll()
+      hardwareTemperatureDrafts.removeAll()
+      gammaDrafts.removeAll()
+      softwareTemperatureDrafts.removeAll()
+      editingBrightness.removeAll()
+      editingContrast.removeAll()
+      editingHardwareTemperature.removeAll()
       displays = []
       layout = []
       relationships = [:]
@@ -179,6 +190,14 @@ final class DisplayController: ObservableObject {
       softwareTransferTasks[id]?.cancel()
       softwareTransferTasks.removeValue(forKey: id)
     }
+    brightnessDrafts = brightnessDrafts.filter { ids.contains($0.key) }
+    contrastDrafts = contrastDrafts.filter { ids.contains($0.key) }
+    hardwareTemperatureDrafts = hardwareTemperatureDrafts.filter { ids.contains($0.key) }
+    gammaDrafts = gammaDrafts.filter { ids.contains($0.key) }
+    softwareTemperatureDrafts = softwareTemperatureDrafts.filter { ids.contains($0.key) }
+    editingBrightness.formIntersection(ids)
+    editingContrast.formIntersection(ids)
+    editingHardwareTemperature.formIntersection(ids)
     modesByDisplay = modesByDisplay.filter { ids.contains($0.key) }
     brightnessByDisplay = brightnessByDisplay.filter { ids.contains($0.key) }
     hdrByDisplay = hdrByDisplay.filter { ids.contains($0.key) }
@@ -190,10 +209,11 @@ final class DisplayController: ObservableObject {
       modesByDisplay[display.id] = DisplayModeCatalog.modes(for: display.id)
       if !busyDisplays.contains(display.id) { loadBrightness(for: display.id) }
       if !busyDisplays.contains(display.id) { loadColorControls(for: display.id) }
-      softwareByDisplay[display.id] = softwareTransfer.status(for: display.id)
-      if gammaDrafts[display.id] == nil { gammaDrafts[display.id] = 1.0 }
+      let softwareStatus = softwareTransfer.status(for: display.id)
+      softwareByDisplay[display.id] = softwareStatus
+      if gammaDrafts[display.id] == nil { gammaDrafts[display.id] = softwareStatus.gamma ?? 1.0 }
       if softwareTemperatureDrafts[display.id] == nil {
-        softwareTemperatureDrafts[display.id] = 6500
+        softwareTemperatureDrafts[display.id] = Double(softwareStatus.kelvin ?? 6500)
       }
     }
     layout = (try? DisplayLayoutService.snapshot()) ?? []
@@ -440,6 +460,13 @@ final class DisplayController: ObservableObject {
 
   private func cancelAllDDCWorkers() {
     for id in Array(ddcWorkerIdentities.keys) { cancelDDCWorker(for: id) }
+  }
+
+  private func cancelAllBrightnessWorkers() {
+    for task in brightnessTasks.values { task.cancel() }
+    brightnessTasks.removeAll()
+    brightnessWorkerIDs.removeAll()
+    pendingBrightness.removeAll()
   }
 
   func setHDR(_ enabled: Bool, for id: CGDirectDisplayID) async {

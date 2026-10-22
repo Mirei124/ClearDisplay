@@ -1,10 +1,25 @@
 import SwiftUI
 
 struct DisplayMenuView: View {
+  private enum MenuSection: Equatable {
+    case resolution(String)
+    case refresh(String)
+    case rotation(String)
+    case mirror(String)
+    case color(String)
+    case profile(String)
+
+    func isVisible(when expanded: MenuSection?) -> Bool {
+      if self == expanded { return true }
+      if case .color(let id) = self, expanded == .profile(id) { return true }
+      return false
+    }
+  }
+
   @ObservedObject var controller: DisplayController
   @Environment(\.colorScheme) private var colorScheme
   @State private var expandedDisplays: Set<String> = []
-  @State private var expandedSections: Set<String> = []
+  @State private var expandedSection: MenuSection?
   @State private var arrangementExpanded = false
   @State private var primaryListExpanded = false
 
@@ -13,21 +28,19 @@ struct DisplayMenuView: View {
       210 + CGFloat(controller.displays.count + controller.disconnectedDisplays.count) * 55
     for display in controller.displays where expandedDisplays.contains(display.stableID) {
       height += 280
-      if expandedSections.contains("resolution-\(display.stableID)") {
+      if MenuSection.resolution(display.stableID).isVisible(when: expandedSection) {
         let modes = controller.modesByDisplay[display.id] ?? []
         let density = modes.first(where: \.isCurrent)?.isHiDPI ?? display.hiDPIEnabled
         let count = DisplayModeCatalog.desktopResolutions(modes, hiDPI: density).count
         height += CGFloat(count) * 30
       }
-      if expandedSections.contains("refresh-\(display.stableID)") { height += 100 }
-      if expandedSections.contains("rotation-\(display.stableID)") { height += 125 }
-      if expandedSections.contains("mirror-\(display.stableID)") {
+      if MenuSection.refresh(display.stableID).isVisible(when: expandedSection) { height += 100 }
+      if MenuSection.rotation(display.stableID).isVisible(when: expandedSection) { height += 125 }
+      if MenuSection.mirror(display.stableID).isVisible(when: expandedSection) {
         height += CGFloat(controller.displays.count) * 30
       }
-      if expandedSections.contains("color-\(display.stableID)") { height += 250 }
-      if expandedSections.contains("color-\(display.stableID)")
-        && expandedSections.contains("profile-\(display.stableID)")
-      {
+      if MenuSection.color(display.stableID).isVisible(when: expandedSection) { height += 250 }
+      if MenuSection.profile(display.stableID).isVisible(when: expandedSection) {
         height += CGFloat(controller.profilesByDisplay[display.id]?.profiles.count ?? 1) * 30
       }
     }
@@ -166,7 +179,7 @@ struct DisplayMenuView: View {
           refreshControl(display)
           topologyControls(display)
           section(
-            "色彩与图像", key: "color-\(display.stableID)",
+            "色彩与图像", key: .color(display.stableID),
             detail: controller.profilesByDisplay[display.id]?.currentName
           ) {
             colorControls(display)
@@ -213,7 +226,7 @@ struct DisplayMenuView: View {
           Button {
             withAnimation(.easeInOut(duration: 0.18)) {
               arrangementExpanded.toggle()
-              expandedSections.removeAll()
+              expandedSection = nil
               if !arrangementExpanded { primaryListExpanded = false }
             }
           } label: {
@@ -329,10 +342,10 @@ struct DisplayMenuView: View {
   }
 
   private func section<Content: View>(
-    _ title: String, key: String, detail: String?,
+    _ title: String, key: MenuSection, detail: String?,
     @ViewBuilder content: () -> Content
   ) -> some View {
-    let expanded = expandedSections.contains(key)
+    let expanded = key.isVisible(when: expandedSection)
     return VStack(alignment: .leading, spacing: 9) {
       Button {
         toggleSection(key)
@@ -367,7 +380,7 @@ struct DisplayMenuView: View {
     let resolutions = DisplayModeCatalog.desktopResolutions(
       modes, hiDPI: current?.isHiDPI ?? display.hiDPIEnabled)
     let recommendation = DisplayModeCatalog.recommendedResolution(modes)
-    let key = "resolution-\(display.stableID)"
+    let key = MenuSection.resolution(display.stableID)
     return section("分辨率", key: key, detail: current.map { resolutionLabel($0.resolutionKey) }) {
       ForEach(resolutions, id: \.self) { resolution in
         let options = DisplayModeCatalog.refreshChoices(for: resolution, in: modes)
@@ -397,7 +410,7 @@ struct DisplayMenuView: View {
   private func refreshControl(_ display: DisplayInfo) -> some View {
     let modes = controller.modesByDisplay[display.id] ?? []
     let current = modes.first(where: \.isCurrent)
-    let key = "refresh-\(display.stableID)"
+    let key = MenuSection.refresh(display.stableID)
     return section("刷新率", key: key, detail: current.map(refreshLabel)) {
       if let current {
         ForEach(distinctRefreshChoices(for: current.resolutionKey, in: modes)) { mode in
@@ -422,7 +435,7 @@ struct DisplayMenuView: View {
     let relationship = controller.relationships[display.id]
     return VStack(alignment: .leading, spacing: 9) {
       section(
-        "旋转", key: "rotation-\(display.stableID)",
+        "旋转", key: .rotation(display.stableID),
         detail: "\(relationship?.rotationDegrees ?? 0)°"
       ) {
         ForEach(DisplayTopologyService.candidateRotations, id: \.self) { degrees in
@@ -442,7 +455,7 @@ struct DisplayMenuView: View {
           .disabled(controller.isBusy || relationship == nil)
         }
       }
-      section("镜像", key: "mirror-\(display.stableID)", detail: mirrorLabel(display)) {
+      section("镜像", key: .mirror(display.stableID), detail: mirrorLabel(display)) {
         Button {
           Task { await controller.setMirror(source: nil, for: display.id) }
         } label: {
@@ -493,7 +506,7 @@ struct DisplayMenuView: View {
     }
     let profileStatus = controller.profilesByDisplay[display.id]
     section(
-      "色彩文件", key: "profile-\(display.stableID)",
+      "色彩文件", key: .profile(display.stableID),
       detail: profileStatus?.currentName ?? "未读取到当前配置"
     ) {
       if profileStatus?.profiles.isEmpty != false {
@@ -687,21 +700,14 @@ struct DisplayMenuView: View {
     }
   }
 
-  private func toggleSection(_ key: String) {
+  private func toggleSection(_ key: MenuSection) {
     withAnimation(.easeInOut(duration: 0.18)) {
       arrangementExpanded = false
       primaryListExpanded = false
-      if key.hasPrefix("profile-") {
-        let colorKey = "color-" + key.dropFirst("profile-".count)
-        if expandedSections.contains(key) {
-          expandedSections = [colorKey]
-        } else {
-          expandedSections = [colorKey, key]
-        }
-      } else if expandedSections.contains(key) {
-        expandedSections.removeAll()
+      if case .profile(let id) = key, expandedSection == key {
+        expandedSection = .color(id)
       } else {
-        expandedSections = [key]
+        expandedSection = expandedSection == key ? nil : key
       }
     }
   }
