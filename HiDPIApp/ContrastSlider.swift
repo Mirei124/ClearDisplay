@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A compact slider with a visible filled track in both system appearances.
+/// A wide white track with an inset value and a clearly outlined thumb.
 struct ContrastSlider: View {
   let title: String
+  let displayValue: String
   @Binding var value: Double
   let range: ClosedRange<Double>
   let step: Double
@@ -10,7 +11,7 @@ struct ContrastSlider: View {
 
   @State private var isDragging = false
 
-  private let thumbSize: CGFloat = 16
+  private let thumbSize: CGFloat = 26
 
   var body: some View {
     GeometryReader { geometry in
@@ -20,16 +21,17 @@ struct ContrastSlider: View {
 
       ZStack(alignment: .leading) {
         Capsule()
-          .fill(Color.primary.opacity(0.36))
-          .frame(height: 6)
-          .padding(.horizontal, thumbSize / 2)
-        Capsule()
-          .fill(Color.accentColor)
-          .frame(width: travel * fraction, height: 6)
-          .offset(x: thumbSize / 2)
+          .fill(.white)
+          .overlay(Capsule().strokeBorder(Color.black.opacity(0.28), lineWidth: 1))
+        Text(displayValue)
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(Color.black.opacity(0.7))
+          .padding(.horizontal, 14)
+          .frame(maxWidth: .infinity, alignment: fraction < 0.25 ? .trailing : .leading)
+          .allowsHitTesting(false)
         Circle()
           .fill(.white)
-          .overlay(Circle().strokeBorder(Color.black.opacity(0.3), lineWidth: 1))
+          .overlay(Circle().strokeBorder(Color.black.opacity(0.34), lineWidth: 1))
           .shadow(color: .black.opacity(0.22), radius: 2, y: 1)
           .frame(width: thumbSize, height: thumbSize)
           .offset(x: travel * fraction)
@@ -52,11 +54,11 @@ struct ContrastSlider: View {
           }
       )
     }
-    .frame(height: 22)
+    .frame(height: 28)
     .opacity(isEnabled ? 1 : 0.5)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(title)
-    .accessibilityValue(String(format: "%.2f", value))
+    .accessibilityValue(displayValue)
     .accessibilityAdjustableAction { direction in
       switch direction {
       case .increment: setValue(value + step)

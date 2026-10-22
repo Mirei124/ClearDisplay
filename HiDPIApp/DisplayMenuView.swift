@@ -68,7 +68,9 @@ struct DisplayMenuView: View {
           }
           globalControls
         }
+        .frame(width: 390)
       }
+      .scrollIndicators(.hidden)
       .frame(
         height: min(menuContentHeight, max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
       )
@@ -576,14 +578,13 @@ struct DisplayMenuView: View {
     step: Double, label: String, disabled: Bool,
     onEditingChanged: @escaping (Bool) -> Void = { _ in }
   ) -> some View {
-    HStack(spacing: 8) {
-      Text(title).font(.caption).frame(width: 60, alignment: .leading)
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title).font(.caption).foregroundStyle(.secondary)
       ContrastSlider(
-        title: title, value: value, range: range, step: step,
+        title: title, displayValue: label, value: value, range: range, step: step,
         onEditingChanged: onEditingChanged
       )
       .disabled(disabled)
-      Text(label).font(.caption.monospacedDigit()).frame(width: 56, alignment: .trailing)
     }
   }
 
