@@ -1,14 +1,14 @@
 import SwiftUI
 
 @main
-struct HiDPIApp: App {
+struct ClearDisplayApp: App {
   @StateObject private var displays = DisplayController()
   #if DEBUG
     @NSApplicationDelegateAdaptor(PreviewAppDelegate.self) private var previewDelegate
   #endif
 
   var body: some Scene {
-    MenuBarExtra("HiDPI", systemImage: "display") {
+    MenuBarExtra("ClearDisplay", systemImage: "display") {
       DisplayMenuView(controller: displays)
     }
     .menuBarExtraStyle(.window)
@@ -21,7 +21,9 @@ struct HiDPIApp: App {
     private var controller: DisplayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-      guard ProcessInfo.processInfo.environment["HIDPI_UI_PREVIEW"] == "1" else { return }
+      guard ProcessInfo.processInfo.environment["CLEARDISPLAY_UI_PREVIEW"] == "1" else {
+        return
+      }
       let controller = DisplayController()
       let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 380, height: 650),
@@ -29,7 +31,7 @@ struct HiDPIApp: App {
         backing: .buffered,
         defer: false
       )
-      window.title = "HiDPI Preview"
+      window.title = "ClearDisplay Preview"
       window.contentView = NSHostingView(rootView: DisplayMenuView(controller: controller))
       window.center()
       window.makeKeyAndOrderFront(nil)

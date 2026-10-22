@@ -3,8 +3,8 @@ set -euo pipefail
 app_root="${0:A:h}"
 dist_root="${DIST_DIR:-${app_root}/dist}"
 version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "${app_root}/HiDPIApp/Info.plist")"
-app_path="${app_root}/build/release/HiDPI.app"
-archive="${dist_root}/HiDPI-${version}-arm64.zip"
+app_path="${app_root}/build/release/ClearDisplay.app"
+archive="${dist_root}/ClearDisplay-${version}-arm64.zip"
 mkdir -p "${dist_root}"
 CONFIGURATION=release "${app_root}/build.sh" "${app_root}/build/release"
 if [[ -n "${SIGN_IDENTITY:-}" ]]; then

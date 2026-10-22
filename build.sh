@@ -2,7 +2,7 @@
 set -euo pipefail
 app_root="${0:A:h}"
 build_root="${1:-${app_root}/build}"
-app_bundle="${build_root}/HiDPI.app"
+app_bundle="${build_root}/ClearDisplay.app"
 sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
 configuration="${CONFIGURATION:-debug}"
 case "${configuration}" in
@@ -30,7 +30,7 @@ swiftc -parse-as-library -target arm64-apple-macos14.0 -sdk "${sdk_path}" \
   -import-objc-header "${app_root}/HiDPIApp/HiDPIApp-Bridging-Header.h" \
   "${swift_flags[@]}" "${swift_sources[@]}" "${objects[@]}" \
   -framework AppKit -framework CoreGraphics -framework IOKit -framework SwiftUI \
-  -o "${app_bundle}/Contents/MacOS/HiDPI"
+  -o "${app_bundle}/Contents/MacOS/ClearDisplay"
 cp "${app_root}/HiDPIApp/Info.plist" "${app_bundle}/Contents/Info.plist"
 plutil -lint "${app_bundle}/Contents/Info.plist"
 print "Built ${app_bundle} (${configuration})"
