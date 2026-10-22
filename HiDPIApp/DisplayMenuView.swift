@@ -256,7 +256,7 @@ struct DisplayMenuView: View {
             set: { controller.contrastDrafts[display.id] = $0 }
           ), in: 0...100,
           onEditingChanged: { editing in
-            if !editing { Task { await controller.setContrast(for: display.id) } }
+            controller.contrastEditingChanged(for: display.id, editing: editing)
           }
         )
         .disabled(busy)

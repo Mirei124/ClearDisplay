@@ -121,6 +121,7 @@ final class DisplaySoftwareTransferService {
   }
   private var original: [CGDirectDisplayID: Formula] = [:]
   private var settings: [CGDirectDisplayID: (gamma: Double, kelvin: Int)] = [:]
+  private var ownerUUID: [CGDirectDisplayID: String] = [:]
   private var pending: [String: [Float]]
   private let recoveryURL: URL
   private var recoveryFileUnreadable: Bool
@@ -155,7 +156,7 @@ final class DisplaySoftwareTransferService {
     guard CGDisplayIsOnline(id) != 0, CGDisplayGammaTableCapacity(id) > 0 else {
       return (nil, nil, "Software transfer is unavailable for this display.")
     }
-    guard let setting = settings[id] else {
+    guard let uuid = displayUUID(id), ownerUUID[id] == uuid, let setting = settings[id] else {
       return (nil, nil, "No app-managed transfer is active.")
     }
     return (setting.gamma, setting.kelvin, nil)
@@ -173,6 +174,7 @@ final class DisplaySoftwareTransferService {
     guard let uuid = displayUUID(id) else {
       return .failure(.unavailable("The display has no stable UUID for crash recovery."))
     }
+    forgetReassignedID(id, currentUUID: uuid)
     guard !recoveryFileUnreadable else {
       return .failure(
         .unavailable("The recovery file cannot be decoded; no new adjustment is safe."))
@@ -209,6 +211,7 @@ final class DisplaySoftwareTransferService {
     }
     original[id] = baseline
     settings[id] = (gamma, kelvin)
+    ownerUUID[id] = uuid
     return .success(())
   }
 
@@ -216,6 +219,9 @@ final class DisplaySoftwareTransferService {
     guard let uuid = displayUUID(id) else {
       return .failure(.unavailable("The display UUID is unavailable."))
     }
+    // A numeric display ID can be assigned to a different physical screen.
+    // Keep the former screen's recovery record and never apply its formula here.
+    forgetReassignedID(id, currentUUID: uuid)
     guard let baseline = original[id] ?? pending[uuid].flatMap(formula) else {
       return .success(())
     }
@@ -224,6 +230,7 @@ final class DisplaySoftwareTransferService {
     else { return .failure(.verificationFailed) }
     original.removeValue(forKey: id)
     settings.removeValue(forKey: id)
+    ownerUUID.removeValue(forKey: id)
     pending.removeValue(forKey: uuid)
     guard savePending() else {
       pending[uuid] = values(baseline)
@@ -254,6 +261,7 @@ final class DisplaySoftwareTransferService {
     var failures: [String: ImageAdjustmentError] = [:]
     for id in onlineDisplayIDs() {
       guard let uuid = displayUUID(id), pending[uuid] != nil else { continue }
+      forgetReassignedID(id, currentUUID: uuid)
       // A pending file also backs an active setting in this process. Display
       // reconfiguration must not undo that setting; only stale records recover.
       guard original[id] == nil, settings[id] == nil else { continue }
@@ -263,6 +271,14 @@ final class DisplaySoftwareTransferService {
   }
 
   var pendingRecoveryUUIDs: [String] { pending.keys.sorted() }
+
+  private func forgetReassignedID(_ id: CGDirectDisplayID, currentUUID: String) {
+    guard let owner = ownerUUID[id], owner != currentUUID else { return }
+    original.removeValue(forKey: id)
+    settings.removeValue(forKey: id)
+    ownerUUID.removeValue(forKey: id)
+    // The old UUID's durable snapshot remains pending for its eventual return.
+  }
 
   private func savePending() -> Bool {
     do {

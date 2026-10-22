@@ -43,6 +43,8 @@ final class DisplayController: ObservableObject {
   private let softwareTransfer = DisplaySoftwareTransferService()
   private var terminationObserver: NSObjectProtocol?
   private var editingBrightness: Set<CGDirectDisplayID> = []
+  private var editingContrast: Set<CGDirectDisplayID> = []
+  private var refreshGeneration = 0
   private var reconfigurationObserver: NSObjectProtocol?
 
   init() {
@@ -77,6 +79,8 @@ final class DisplayController: ObservableObject {
   }
 
   func refresh() {
+    refreshGeneration += 1
+    let generation = refreshGeneration
     let count = HDReadDisplays(nil, 0)
     guard count > 0 else {
       displays = []
@@ -91,8 +95,11 @@ final class DisplayController: ObservableObject {
       softwareByDisplay = [:]
       Task {
         let service = DisplayConnectionService.shared
-        connectionSupported = await service.isSupported
-        disconnectedDisplays = await service.disconnected()
+        let supported = await service.isSupported
+        let disconnected = await service.disconnected()
+        guard generation == refreshGeneration else { return }
+        connectionSupported = supported
+        disconnectedDisplays = disconnected
       }
       return
     }
@@ -151,8 +158,11 @@ final class DisplayController: ObservableObject {
       })
     Task {
       let service = DisplayConnectionService.shared
-      connectionSupported = await service.isSupported
-      disconnectedDisplays = await service.disconnected()
+      let supported = await service.isSupported
+      let disconnected = await service.disconnected()
+      guard generation == refreshGeneration else { return }
+      connectionSupported = supported
+      disconnectedDisplays = disconnected
     }
   }
 
@@ -185,12 +195,18 @@ final class DisplayController: ObservableObject {
   }
 
   func loadColorControls(for id: CGDirectDisplayID) {
+    let generation = refreshGeneration
+    guard let stableID = displays.first(where: { $0.id == id })?.stableID else { return }
     hdrByDisplay[id] = DisplayHDRService.status(for: id)
     Task {
       let profile = await Task.detached(priority: .utility) {
         DisplayColorProfileService.status(for: id)
       }.value
-      guard displays.contains(where: { $0.id == id }) else { return }
+      guard generation == refreshGeneration,
+        displays.contains(where: { $0.id == id && $0.stableID == stableID })
+      else {
+        return
+      }
       profilesByDisplay[id] = profile
     }
     guard displays.contains(where: { $0.id == id && !$0.isBuiltin }) else { return }
@@ -201,10 +217,27 @@ final class DisplayController: ObservableObject {
           DisplayImageAdjustmentService.hardwareTemperature(for: id)
         )
       }.value
-      guard displays.contains(where: { $0.id == id }) else { return }
+      guard generation == refreshGeneration,
+        displays.contains(where: { $0.id == id && $0.stableID == stableID })
+      else {
+        return
+      }
       contrastByDisplay[id] = values.0
       temperatureByDisplay[id] = values.1
-      if let value = values.0.value, !busyDisplays.contains(id) { contrastDrafts[id] = value }
+      if let value = values.0.value, !busyDisplays.contains(id), !editingContrast.contains(id) {
+        contrastDrafts[id] = value
+      }
+    }
+  }
+
+  func contrastEditingChanged(for id: CGDirectDisplayID, editing: Bool) {
+    if editing {
+      editingContrast.insert(id)
+    } else {
+      Task {
+        await setContrast(for: id)
+        editingContrast.remove(id)
+      }
     }
   }
 
@@ -329,11 +362,17 @@ final class DisplayController: ObservableObject {
   }
 
   func loadBrightness(for id: CGDirectDisplayID) {
+    let generation = refreshGeneration
+    guard let stableID = displays.first(where: { $0.id == id })?.stableID else { return }
     Task {
       let status = await Task.detached(priority: .utility) {
         DisplayBrightnessService.status(for: id)
       }.value
-      guard displays.contains(where: { $0.id == id }) else { return }
+      guard generation == refreshGeneration,
+        displays.contains(where: { $0.id == id && $0.stableID == stableID })
+      else {
+        return
+      }
       brightnessByDisplay[id] = status
       if let percent = status.percent, !busyDisplays.contains(id), !editingBrightness.contains(id) {
         brightnessDrafts[id] = percent
