@@ -40,15 +40,25 @@ final class DisplayController: ObservableObject {
   @Published private(set) var contrastByDisplay: [CGDirectDisplayID: ImageAdjustmentStatus] = [:]
   @Published private(set) var temperatureByDisplay: [CGDirectDisplayID: ImageAdjustmentStatus] = [:]
   @Published var contrastDrafts: [CGDirectDisplayID: Double] = [:]
+  @Published var hardwareTemperatureDrafts: [CGDirectDisplayID: Double] = [:]
   @Published private(set) var softwareByDisplay:
     [CGDirectDisplayID: (gamma: Double?, kelvin: Int?, reason: String?)] = [:]
   @Published var gammaDrafts: [CGDirectDisplayID: Double] = [:]
   @Published var softwareTemperatureDrafts: [CGDirectDisplayID: Double] = [:]
+  @Published private(set) var launchAtLoginStatus = LaunchAtLoginService.status()
+  var launchAtLoginEnabled: Bool { launchAtLoginStatus.isEnabled }
+  var launchAtLoginSupported: Bool { launchAtLoginStatus.isAvailable }
   private let softwareTransfer = DisplaySoftwareTransferService()
   private let nightShiftService = DisplayNightShiftService()
   private var terminationObserver: NSObjectProtocol?
   private var editingBrightness: Set<CGDirectDisplayID> = []
   private var editingContrast: Set<CGDirectDisplayID> = []
+  private var editingHardwareTemperature: Set<CGDirectDisplayID> = []
+  private var pendingDDCContrast: [CGDirectDisplayID: Double] = [:]
+  private var pendingDDCTemperature: [CGDirectDisplayID: Int] = [:]
+  private var ddcTasks: [CGDirectDisplayID: Task<Void, Never>] = [:]
+  private var ddcWorkerIdentities: [CGDirectDisplayID: (stableID: String, token: UUID)] = [:]
+  private var softwareTransferTasks: [CGDirectDisplayID: Task<Void, Never>] = [:]
   private var refreshGeneration = 0
   private var reconfigurationObserver: NSObjectProtocol?
 
@@ -76,6 +86,8 @@ final class DisplayController: ObservableObject {
   }
 
   deinit {
+    for task in softwareTransferTasks.values { task.cancel() }
+    for task in ddcTasks.values { task.cancel() }
     CGDisplayRemoveReconfigurationCallback(displayReconfigurationCallback, nil)
     if let reconfigurationObserver {
       NotificationCenter.default.removeObserver(reconfigurationObserver)
@@ -90,9 +102,11 @@ final class DisplayController: ObservableObject {
       appearanceMode = try? DisplayAppearanceService.readMode()
       nightShiftState = try? nightShiftService?.readState()
       trueToneStatus = DisplayTrueToneService.status()
+      launchAtLoginStatus = LaunchAtLoginService.status()
     }
     let count = HDReadDisplays(nil, 0)
     guard count > 0 else {
+      cancelAllDDCWorkers()
       displays = []
       layout = []
       relationships = [:]
@@ -144,6 +158,15 @@ final class DisplayController: ObservableObject {
       )
     }
     let ids = Set(displays.map(\.id))
+    for (id, identity) in Array(ddcWorkerIdentities) {
+      if displays.first(where: { $0.id == id })?.stableID != identity.stableID {
+        cancelDDCWorker(for: id)
+      }
+    }
+    for id in softwareTransferTasks.keys.filter({ !ids.contains($0) }) {
+      softwareTransferTasks[id]?.cancel()
+      softwareTransferTasks.removeValue(forKey: id)
+    }
     modesByDisplay = modesByDisplay.filter { ids.contains($0.key) }
     brightnessByDisplay = brightnessByDisplay.filter { ids.contains($0.key) }
     hdrByDisplay = hdrByDisplay.filter { ids.contains($0.key) }
@@ -231,11 +254,38 @@ final class DisplayController: ObservableObject {
     busyDisplays.remove(id)
   }
 
+  /// Coalesce slider changes so each display receives at most one transfer
+  /// update after a short pause. The editing-end call below applies the final
+  /// value even if the user releases the slider before the delay expires.
+  func scheduleSoftwareTransfer(for id: CGDirectDisplayID) {
+    softwareTransferTasks[id]?.cancel()
+    softwareTransferTasks[id] = Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .milliseconds(75))
+      guard !Task.isCancelled else { return }
+      self?.applySoftwareTransfer(for: id)
+      self?.softwareTransferTasks.removeValue(forKey: id)
+    }
+  }
+
+  func setSoftwareTransferLive(for id: CGDirectDisplayID) {
+    scheduleSoftwareTransfer(for: id)
+  }
+
+  func finishSoftwareTransferEditing(for id: CGDirectDisplayID) {
+    softwareTransferTasks[id]?.cancel()
+    softwareTransferTasks.removeValue(forKey: id)
+    applySoftwareTransfer(for: id)
+  }
+
   func resetSoftwareTransfer(for id: CGDirectDisplayID) {
+    softwareTransferTasks[id]?.cancel()
+    softwareTransferTasks.removeValue(forKey: id)
     guard !isBusy, !busyDisplays.contains(id) else { return }
     busyDisplays.insert(id)
     errorMessage = nil
-    switch softwareTransfer.reset(for: id) {
+    // Neutral coefficients reproduce the captured baseline while keeping the
+    // durable recovery snapshot available until normal app termination.
+    switch softwareTransfer.set(gamma: 1.0, kelvin: 6500, for: id) {
     case .success:
       softwareByDisplay[id] = softwareTransfer.status(for: id)
       gammaDrafts[id] = 1.0
@@ -243,6 +293,17 @@ final class DisplayController: ObservableObject {
     case .failure(let error): errorMessage = error.localizedDescription
     }
     busyDisplays.remove(id)
+  }
+
+  func setLaunchAtLogin(_ enabled: Bool) {
+    guard !globalControlsBusy else { return }
+    globalControlsBusy = true
+    errorMessage = nil
+    do { try LaunchAtLoginService.setEnabled(enabled) } catch {
+      errorMessage = error.localizedDescription
+    }
+    launchAtLoginStatus = LaunchAtLoginService.status()
+    globalControlsBusy = false
   }
 
   func loadColorControls(for id: CGDirectDisplayID) {
@@ -275,6 +336,11 @@ final class DisplayController: ObservableObject {
       }
       contrastByDisplay[id] = values.0
       temperatureByDisplay[id] = values.1
+      if let kelvin = values.1.value, !busyDisplays.contains(id),
+        !editingHardwareTemperature.contains(id)
+      {
+        hardwareTemperatureDrafts[id] = kelvin
+      }
       if let value = values.0.value, !busyDisplays.contains(id), !editingContrast.contains(id) {
         contrastDrafts[id] = value
       }
@@ -285,11 +351,83 @@ final class DisplayController: ObservableObject {
     if editing {
       editingContrast.insert(id)
     } else {
-      Task {
-        await setContrast(for: id)
-        editingContrast.remove(id)
+      editingContrast.remove(id)
+      contrastDraftChanged(for: id)
+    }
+  }
+
+  func contrastDraftChanged(for id: CGDirectDisplayID) {
+    guard displays.contains(where: { $0.id == id }), let value = contrastDrafts[id] else {
+      return
+    }
+    pendingDDCContrast[id] = value
+    scheduleDDCWorker(for: id)
+  }
+
+  func hardwareTemperatureDraftChanged(for id: CGDirectDisplayID) {
+    guard displays.contains(where: { $0.id == id }),
+      let value = hardwareTemperatureDrafts[id]
+    else { return }
+    let presets = DisplayImageAdjustmentService.hardwareTemperaturePresets.values
+    guard let nearest = presets.min(by: { abs(Double($0) - value) < abs(Double($1) - value) })
+    else { return }
+    // Replace the pending intent even when the slider returns to the value
+    // currently reported by the display. An older queued preset must not win.
+    pendingDDCTemperature[id] = nearest
+    scheduleDDCWorker(for: id)
+  }
+
+  private func scheduleDDCWorker(for id: CGDirectDisplayID) {
+    guard ddcTasks[id] == nil else { return }
+    guard let stableID = displays.first(where: { $0.id == id })?.stableID else { return }
+    let token = UUID()
+    ddcWorkerIdentities[id] = (stableID, token)
+    ddcTasks[id] = Task { @MainActor [weak self] in
+      // DDC transactions are slow and monitors can drop closely spaced writes.
+      try? await Task.sleep(for: .milliseconds(150))
+      guard let self else { return }
+      while !Task.isCancelled {
+        guard self.ddcWorkerIdentities[id]?.token == token,
+          self.displays.contains(where: { $0.id == id && $0.stableID == stableID })
+        else { break }
+        if self.isBusy || self.busyDisplays.contains(id) {
+          try? await Task.sleep(for: .milliseconds(100))
+          continue
+        }
+        if let value = self.pendingDDCContrast.removeValue(forKey: id) {
+          if abs((self.contrastByDisplay[id]?.value ?? -1) - value) > 1 {
+            self.contrastDrafts[id] = value
+            await self.setContrast(for: id)
+          }
+        } else if let kelvin = self.pendingDDCTemperature.removeValue(forKey: id) {
+          if Int(self.temperatureByDisplay[id]?.value ?? -1) != kelvin {
+            await self.setHardwareTemperature(kelvin, for: id)
+          }
+        } else {
+          break
+        }
+      }
+      if self.ddcWorkerIdentities[id]?.token == token {
+        self.ddcTasks.removeValue(forKey: id)
+        self.ddcWorkerIdentities.removeValue(forKey: id)
       }
     }
+  }
+
+  private func cancelDDCWorker(for id: CGDirectDisplayID) {
+    ddcTasks[id]?.cancel()
+    ddcTasks.removeValue(forKey: id)
+    ddcWorkerIdentities.removeValue(forKey: id)
+    pendingDDCContrast.removeValue(forKey: id)
+    pendingDDCTemperature.removeValue(forKey: id)
+    editingContrast.remove(id)
+    editingHardwareTemperature.remove(id)
+    contrastDrafts.removeValue(forKey: id)
+    hardwareTemperatureDrafts.removeValue(forKey: id)
+  }
+
+  private func cancelAllDDCWorkers() {
+    for id in Array(ddcWorkerIdentities.keys) { cancelDDCWorker(for: id) }
   }
 
   func setHDR(_ enabled: Bool, for id: CGDirectDisplayID) async {
@@ -315,16 +453,28 @@ final class DisplayController: ObservableObject {
   }
 
   func setContrast(for id: CGDirectDisplayID) async {
-    guard !isBusy, !busyDisplays.contains(id), let value = contrastDrafts[id] else { return }
+    guard !isBusy, !busyDisplays.contains(id), let value = contrastDrafts[id],
+      let stableID = displays.first(where: { $0.id == id })?.stableID
+    else { return }
     busyDisplays.insert(id)
     errorMessage = nil
     let result = await Task.detached(priority: .userInitiated) {
-      DisplayImageAdjustmentService.setContrast(value, for: id)
+      guard displayStableID(id) == stableID else {
+        return Result<ImageAdjustmentStatus, ImageAdjustmentError>.failure(
+          .unavailable("The display changed before the DDC write."))
+      }
+      return DisplayImageAdjustmentService.setContrast(value, for: id)
     }.value
+    guard displays.contains(where: { $0.id == id && $0.stableID == stableID }) else {
+      busyDisplays.remove(id)
+      return
+    }
     switch result {
     case .success(let status):
       contrastByDisplay[id] = status
-      contrastDrafts[id] = status.value ?? value
+      if !editingContrast.contains(id), pendingDDCContrast[id] == nil {
+        contrastDrafts[id] = status.value ?? value
+      }
     case .failure(let error):
       errorMessage = error.localizedDescription
     }
@@ -332,17 +482,40 @@ final class DisplayController: ObservableObject {
   }
 
   func setHardwareTemperature(_ kelvin: Int, for id: CGDirectDisplayID) async {
-    guard !isBusy, !busyDisplays.contains(id) else { return }
+    guard !isBusy, !busyDisplays.contains(id),
+      let stableID = displays.first(where: { $0.id == id })?.stableID
+    else { return }
     busyDisplays.insert(id)
     errorMessage = nil
     let result = await Task.detached(priority: .userInitiated) {
-      DisplayImageAdjustmentService.setHardwareTemperature(kelvin, for: id)
+      guard displayStableID(id) == stableID else {
+        return Result<ImageAdjustmentStatus, ImageAdjustmentError>.failure(
+          .unavailable("The display changed before the DDC write."))
+      }
+      return DisplayImageAdjustmentService.setHardwareTemperature(kelvin, for: id)
     }.value
+    guard displays.contains(where: { $0.id == id && $0.stableID == stableID }) else {
+      busyDisplays.remove(id)
+      return
+    }
     switch result {
-    case .success(let status): temperatureByDisplay[id] = status
+    case .success(let status):
+      temperatureByDisplay[id] = status
+      if !editingHardwareTemperature.contains(id), pendingDDCTemperature[id] == nil {
+        hardwareTemperatureDrafts[id] = status.value ?? Double(kelvin)
+      }
     case .failure(let error): errorMessage = error.localizedDescription
     }
     busyDisplays.remove(id)
+  }
+
+  func hardwareTemperatureEditingChanged(for id: CGDirectDisplayID, editing: Bool) {
+    if editing {
+      editingHardwareTemperature.insert(id)
+    } else {
+      editingHardwareTemperature.remove(id)
+      hardwareTemperatureDraftChanged(for: id)
+    }
   }
 
   func applyLayout(origins: [CGDirectDisplayID: CGPoint], primaryID: CGDirectDisplayID) async {
@@ -507,6 +680,11 @@ private func displayReconfigurationCallback(
   Task { @MainActor in
     NotificationCenter.default.post(name: .displayModeDidChange, object: nil)
   }
+}
+
+private func displayStableID(_ id: CGDirectDisplayID) -> String? {
+  guard let unmanagedUUID = CGDisplayCreateUUIDFromDisplayID(id) else { return nil }
+  return CFUUIDCreateString(nil, unmanagedUUID.takeRetainedValue()) as String
 }
 
 extension Notification.Name {

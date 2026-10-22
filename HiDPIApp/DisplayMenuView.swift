@@ -2,12 +2,14 @@ import SwiftUI
 
 struct DisplayMenuView: View {
   @ObservedObject var controller: DisplayController
+  @State private var expandedDisplays: Set<String> = []
+  @State private var expandedSections: Set<String> = []
+  @State private var arrangementExpanded = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack {
-        Label("显示器", systemImage: "display.2")
-          .font(.headline)
+        Text("ClearDisplay").font(.headline)
         Spacer()
         Button {
           controller.refresh()
@@ -22,86 +24,24 @@ struct DisplayMenuView: View {
       .padding(.vertical, 14)
 
       Divider()
-
-      HStack {
-        Menu {
-          Button("浅色") { controller.setAppearance(.light) }
-            .disabled(controller.appearanceMode == .automatic)
-          Button("深色") { controller.setAppearance(.dark) }
-            .disabled(controller.appearanceMode == .automatic)
-          Divider()
-          Text("自动外观请在系统设置中调整")
-        } label: {
-          Label(appearanceLabel, systemImage: "circle.lefthalf.filled")
-            .font(.caption)
-        }
-        .disabled(
-          controller.isBusy || controller.globalControlsBusy || controller.appearanceMode == nil)
-        Spacer()
-        if let nightShift = controller.nightShiftState, nightShift.isSupported {
-          Toggle(
-            "夜览",
-            isOn: Binding(
-              get: { controller.nightShiftState?.isEnabled ?? false },
-              set: { controller.setNightShift($0) }
-            )
-          )
-          .toggleStyle(.switch)
-          .controlSize(.small)
-          .disabled(controller.isBusy || controller.globalControlsBusy)
-        }
-        if let trueTone = controller.trueToneStatus, trueTone.isSupported,
-          let enabled = trueTone.isEnabled
-        {
-          Toggle(
-            "原彩",
-            isOn: Binding(
-              get: { controller.trueToneStatus?.isEnabled ?? enabled },
-              set: { value in Task { await controller.setTrueTone(value) } }
-            )
-          )
-          .toggleStyle(.switch)
-          .controlSize(.small)
-          .disabled(controller.isBusy || controller.globalControlsBusy || !trueTone.isAvailable)
-          .help(trueTone.unavailableReason ?? "切换系统原彩显示")
-        }
-      }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 10)
-
-      Divider()
-
-      if controller.displays.isEmpty && controller.disconnectedDisplays.isEmpty {
-        ContentUnavailableView("未检测到显示器", systemImage: "display.slash")
-          .frame(width: 320, height: 150)
-      } else {
-        ScrollView {
-          VStack(spacing: 0) {
-            if !controller.layout.isEmpty {
-              DisplayArrangementView(controller: controller)
-                .padding(16)
-              Divider()
-            }
-            ForEach(controller.displays) { display in
-              displayRow(display)
-              if display.id != controller.displays.last?.id {
-                Divider().padding(.leading, 16)
-              }
-            }
-            ForEach(controller.disconnectedDisplays) { display in
-              HStack {
-                Label(display.name, systemImage: "display.slash")
-                Spacer()
-                Button("连接") { Task { await controller.reconnect(display) } }
-                  .disabled(controller.isBusy || !controller.connectionSupported)
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 10)
-            }
+      ScrollView {
+        VStack(spacing: 0) {
+          if controller.displays.isEmpty && controller.disconnectedDisplays.isEmpty {
+            ContentUnavailableView("未检测到显示器", systemImage: "display.slash")
+              .frame(height: 150)
           }
+          ForEach(controller.displays) { display in
+            displayCard(display)
+            Divider()
+          }
+          ForEach(controller.disconnectedDisplays) { display in
+            disconnectedCard(display)
+            Divider()
+          }
+          globalControls
         }
-        .frame(maxHeight: 570)
       }
+      .frame(maxHeight: 650)
 
       if let error = controller.errorMessage {
         Divider()
@@ -111,7 +51,6 @@ struct DisplayMenuView: View {
           .fixedSize(horizontal: false, vertical: true)
           .padding(12)
       }
-
       Divider()
       HStack {
         Text("状态以系统读取结果为准")
@@ -124,222 +63,313 @@ struct DisplayMenuView: View {
       .padding(.horizontal, 16)
       .padding(.vertical, 10)
     }
-    .frame(width: 380)
+    .frame(width: 390)
   }
 
-  private func displayRow(_ display: DisplayInfo) -> some View {
-    VStack(alignment: .leading, spacing: 9) {
-      HStack(alignment: .firstTextBaseline) {
-        Text(display.name)
-          .font(.subheadline.weight(.semibold))
-          .lineLimit(1)
-        Spacer(minLength: 8)
-        Text(display.isBuiltin ? "内建" : "外接")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-
-      Text("桌面 \(dimensions(display.logicalSize))  ·  渲染 \(dimensions(display.pixelSize))")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .minimumScaleFactor(0.8)
-
-      brightnessControl(display)
-      modeControls(display)
-      topologyControls(display)
-      colorControls(display)
-      softwareColorControls(display)
-
-      HStack {
-        Text(display.refreshRate > 0 ? String(format: "%.2f Hz", display.refreshRate) : "刷新率未知")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-        Spacer()
-        if !display.isBuiltin {
-          Toggle(
-            "HiDPI",
-            isOn: Binding(
-              get: { display.hiDPIEnabled },
-              set: { newValue in
-                Task { await controller.setHiDPI(for: display.id, enabled: newValue) }
-              }
+  private func displayCard(_ display: DisplayInfo) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 8) {
+        Button {
+          toggleExpansion(display.stableID)
+        } label: {
+          HStack(spacing: 10) {
+            Image(
+              systemName: expandedDisplays.contains(display.stableID)
+                ? "chevron.down" : "chevron.right"
             )
-          )
-          .toggleStyle(.switch)
-          .controlSize(.small)
-          .disabled(!display.canToggleHiDPI || controller.isBusy)
-          .help(display.unavailableReason ?? "保持桌面大小及刷新率切换渲染密度")
-        }
-      }
-
-      if !display.isBuiltin, !display.canToggleHiDPI, let reason = display.unavailableReason {
-        Text(reason)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-    }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 13)
-  }
-
-  @ViewBuilder
-  private func softwareColorControls(_ display: DisplayInfo) -> some View {
-    if let status = controller.softwareByDisplay[display.id],
-      status.reason == nil || status.reason == "No app-managed transfer is active."
-    {
-      let busy = controller.isBusy || controller.busyDisplays.contains(display.id)
-      let hdr = controller.hdrByDisplay[display.id]?.isEnabled == true
-      VStack(alignment: .leading, spacing: 5) {
-        HStack {
-          Text("软件 Gamma / 色温")
-            .font(.caption.weight(.medium))
-          Spacer()
-          if status.gamma != nil {
-            Button("重置") { controller.resetSoftwareTransfer(for: display.id) }
-              .font(.caption)
-              .disabled(busy)
-          }
-        }
-        HStack {
-          Text("Gamma").font(.caption)
-          Slider(
-            value: Binding(
-              get: { controller.gammaDrafts[display.id] ?? status.gamma ?? 1.0 },
-              set: { controller.gammaDrafts[display.id] = $0 }
-            ), in: 0.5...2.0)
-          Text(String(format: "%.2f", controller.gammaDrafts[display.id] ?? status.gamma ?? 1.0))
-            .font(.caption.monospacedDigit())
-            .frame(width: 38, alignment: .trailing)
-        }
-        HStack {
-          Text("色温").font(.caption)
-          Slider(
-            value: Binding(
-              get: {
-                controller.softwareTemperatureDrafts[display.id] ?? Double(status.kelvin ?? 6500)
-              },
-              set: { controller.softwareTemperatureDrafts[display.id] = $0 }
-            ), in: 4000...10000, step: 100)
-          Text(
-            "\(Int((controller.softwareTemperatureDrafts[display.id] ?? Double(status.kelvin ?? 6500)).rounded())) K"
-          )
-          .font(.caption.monospacedDigit())
-          .frame(width: 54, alignment: .trailing)
-        }
-        HStack {
-          if let gamma = status.gamma, let kelvin = status.kelvin {
-            Text(String(format: "当前 %.2f / %d K", gamma, kelvin))
+            .font(.caption.weight(.semibold))
+            .frame(width: 14)
+            VStack(alignment: .leading, spacing: 2) {
+              Text(display.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+              Text(
+                "\(display.isBuiltin ? "内建显示器" : "外接显示器") · \(dimensions(display.logicalSize)) · \(refreshValue(display.refreshRate))"
+              )
               .font(.caption2)
               .foregroundStyle(.secondary)
-          } else {
-            Text("当前未启用软件调整")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
+              .lineLimit(1)
+            }
+            Spacer(minLength: 0)
           }
-          Spacer()
-          Button("应用") { controller.applySoftwareTransfer(for: display.id) }
-            .font(.caption)
-            .disabled(busy || hdr)
+          .contentShape(Rectangle())
         }
-        if hdr {
-          Text("HDR 开启时无法应用软件 Gamma / 色温")
+        .buttonStyle(.plain)
+        Toggle(
+          "连接 \(display.name)",
+          isOn: Binding(
+            get: { true },
+            set: { enabled in
+              if !enabled { Task { await controller.disconnect(display) } }
+            }
+          )
+        )
+        .labelsHidden()
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .disabled(controller.isBusy || !controller.connectionSupported)
+        .help("断开此显示器；至少保留一台活动显示器")
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+
+      if expandedDisplays.contains(display.stableID) {
+        VStack(alignment: .leading, spacing: 10) {
+          Text("桌面 \(dimensions(display.logicalSize)) · 渲染 \(dimensions(display.pixelSize))")
             .font(.caption2)
             .foregroundStyle(.secondary)
+          brightnessControl(display)
+          if !display.isBuiltin {
+            stateRow(
+              "HiDPI", icon: "sparkles.rectangle.stack", enabled: display.hiDPIEnabled,
+              disabled: !display.canToggleHiDPI || controller.isBusy
+            ) {
+              Task { await controller.setHiDPI(for: display.id, enabled: !display.hiDPIEnabled) }
+            }
+            .help(display.unavailableReason ?? "保持桌面大小和刷新率切换渲染密度")
+            if !display.canToggleHiDPI, let reason = display.unavailableReason {
+              Text(reason).font(.caption2).foregroundStyle(.secondary)
+            }
+          }
+          resolutionControl(display)
+          refreshControl(display)
+          section("显示关系", key: "topology-\(display.stableID)", detail: relationshipLabel(display)) {
+            topologyControls(display)
+          }
+          section(
+            "色彩与图像", key: "color-\(display.stableID)",
+            detail: controller.profilesByDisplay[display.id]?.currentName
+          ) {
+            colorControls(display)
+            softwareColorControls(display)
+          }
+        }
+        .padding(.leading, 36)
+        .padding(.trailing, 16)
+        .padding(.bottom, 14)
+      }
+    }
+  }
+
+  private func disconnectedCard(_ display: DisconnectedDisplay) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: "display.slash").frame(width: 14)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(display.name).font(.subheadline.weight(.semibold))
+        Text("已断开 · \(display.isBuiltin ? "内建显示器" : "外接显示器")")
+          .font(.caption2).foregroundStyle(.secondary)
+      }
+      Spacer()
+      Toggle(
+        "连接 \(display.name)",
+        isOn: Binding(
+          get: { false },
+          set: { enabled in if enabled { Task { await controller.reconnect(display) } } }
+        )
+      )
+      .labelsHidden().toggleStyle(.switch).controlSize(.small)
+      .disabled(controller.isBusy || !controller.connectionSupported)
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+  }
+
+  private var globalControls: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      Text("通用设置")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+      if !controller.layout.isEmpty {
+        Button {
+          arrangementExpanded.toggle()
+        } label: {
+          HStack {
+            Text("显示器排列与主屏")
+            Spacer()
+            Image(systemName: arrangementExpanded ? "chevron.down" : "chevron.right")
+          }
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(9)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        if arrangementExpanded { DisplayArrangementView(controller: controller) }
+      }
+      HStack(spacing: 8) {
+        appearanceTile
+        stateTile(
+          "夜览", icon: "moon.stars.fill", enabled: controller.nightShiftState?.isEnabled == true,
+          disabled: controller.isBusy || controller.globalControlsBusy
+            || controller.nightShiftState?.isSupported != true
+        ) {
+          controller.setNightShift(controller.nightShiftState?.isEnabled != true)
+        }
+        stateTile(
+          "原彩", icon: "sparkles", enabled: controller.trueToneStatus?.isEnabled == true,
+          disabled: controller.isBusy || controller.globalControlsBusy
+            || controller.trueToneStatus?.isAvailable != true
+        ) {
+          Task { await controller.setTrueTone(controller.trueToneStatus?.isEnabled != true) }
+        }
+        .help(controller.trueToneStatus?.unavailableReason ?? "切换系统原彩显示")
+      }
+      stateRow(
+        "开机自启动", icon: "power", enabled: controller.launchAtLoginEnabled,
+        disabled: !controller.launchAtLoginSupported
+      ) {
+        controller.setLaunchAtLogin(!controller.launchAtLoginEnabled)
+      }
+    }
+    .padding(16)
+  }
+
+  private var appearanceTile: some View {
+    stateTile(
+      "外观", icon: controller.appearanceMode == .dark ? "moon.fill" : "sun.max.fill",
+      enabled: controller.appearanceMode == .dark,
+      disabled: controller.isBusy || controller.globalControlsBusy
+        || controller.appearanceMode == nil || controller.appearanceMode == .automatic
+    ) {
+      controller.setAppearance(controller.appearanceMode == .dark ? .light : .dark)
+    }
+    .help(controller.appearanceMode == .automatic ? "自动外观请在系统设置中调整" : "切换浅色与深色外观")
+  }
+
+  private func stateTile(
+    _ title: String, icon: String, enabled: Bool, disabled: Bool,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) { tileLabel(title, icon: icon, enabled: enabled) }
+      .buttonStyle(.plain)
+      .disabled(disabled)
+  }
+
+  private func tileLabel(_ title: String, icon: String, enabled: Bool) -> some View {
+    VStack(spacing: 5) {
+      Image(systemName: icon).font(.system(size: 16, weight: .medium))
+      Text(title).font(.caption)
+    }
+    .frame(maxWidth: .infinity)
+    .frame(height: 55)
+    .background(
+      enabled ? Color.accentColor.opacity(0.22) : Color.secondary.opacity(0.1),
+      in: RoundedRectangle(cornerRadius: 9)
+    )
+    .contentShape(RoundedRectangle(cornerRadius: 9))
+  }
+
+  private func stateRow(
+    _ title: String, icon: String, enabled: Bool, disabled: Bool,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      HStack(spacing: 10) {
+        Image(systemName: icon)
+          .frame(width: 29, height: 29)
+          .background(
+            enabled ? Color.accentColor.opacity(0.24) : Color.secondary.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 7))
+        Text(title)
+        Spacer()
+        Text(enabled ? "开启" : "关闭").font(.caption).foregroundStyle(.secondary)
+      }
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(disabled)
+  }
+
+  private func section<Content: View>(
+    _ title: String, key: String, detail: String?,
+    @ViewBuilder content: () -> Content
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 9) {
+      Button {
+        toggleSection(key)
+      } label: {
+        HStack(spacing: 8) {
+          Text(title).font(.caption.weight(.semibold))
+          Spacer()
+          if let detail { Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+          Image(systemName: expandedSections.contains(key) ? "chevron.down" : "chevron.right")
+            .font(.caption2)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .padding(9)
+      .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+      if expandedSections.contains(key) {
+        VStack(alignment: .leading, spacing: 9, content: content)
+          .padding(.horizontal, 4)
+      }
+    }
+  }
+
+  private func resolutionControl(_ display: DisplayInfo) -> some View {
+    let modes = controller.modesByDisplay[display.id] ?? []
+    let current = modes.first(where: \.isCurrent)
+    let resolutions = DisplayModeCatalog.groupedResolutions(modes)
+    let recommendation = DisplayModeCatalog.recommendedResolution(modes)
+    let key = "resolution-\(display.stableID)"
+    return section("分辨率", key: key, detail: current.map { resolutionLabel($0.resolutionKey) }) {
+      ForEach([true, false], id: \.self) { hiDPI in
+        let choices = resolutions.filter { $0.isHiDPI == hiDPI }
+        if !choices.isEmpty {
+          Text(hiDPI ? "HiDPI" : "非 HiDPI")
+            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+          ForEach(choices, id: \.self) { resolution in
+            let options = DisplayModeCatalog.refreshChoices(for: resolution, in: modes)
+            if let mode = preferredMode(options, current: current) {
+              Button {
+                Task { await controller.setMode(mode, for: display.id) }
+              } label: {
+                HStack {
+                  Text("\(resolution == recommendation ? "★ " : "")\(resolutionLabel(resolution))")
+                  Spacer()
+                  Text(
+                    resolutionDetail(
+                      resolution, mode: mode, current: current,
+                      recommended: recommendation)
+                  )
+                  .font(.caption2).foregroundStyle(.secondary)
+                }
+              }
+              .buttonStyle(.plain)
+              .padding(.vertical, 3)
+              .disabled(controller.isBusy)
+            }
+          }
         }
       }
     }
   }
 
-  @ViewBuilder
-  private func colorControls(_ display: DisplayInfo) -> some View {
-    let busy = controller.isBusy || controller.busyDisplays.contains(display.id)
-    if !display.isBuiltin, let hdr = controller.hdrByDisplay[display.id],
-      hdr.isSupported, let enabled = hdr.isEnabled
-    {
-      Toggle(
-        "HDR",
-        isOn: Binding(
-          get: { controller.hdrByDisplay[display.id]?.isEnabled ?? enabled },
-          set: { value in Task { await controller.setHDR(value, for: display.id) } }
-        )
-      )
-      .toggleStyle(.switch)
-      .controlSize(.small)
-      .disabled(busy)
-    }
-
-    if let profileStatus = controller.profilesByDisplay[display.id],
-      !profileStatus.profiles.isEmpty
-    {
-      Menu {
-        ForEach(profileStatus.profiles) { profile in
+  private func refreshControl(_ display: DisplayInfo) -> some View {
+    let modes = controller.modesByDisplay[display.id] ?? []
+    let current = modes.first(where: \.isCurrent)
+    let key = "refresh-\(display.stableID)"
+    return section("刷新率", key: key, detail: current.map(refreshLabel)) {
+      if let current {
+        ForEach(distinctRefreshChoices(for: current.resolutionKey, in: modes)) { mode in
           Button {
-            Task { await controller.setProfile(profile, for: display.id) }
+            Task { await controller.setMode(mode, for: display.id) }
           } label: {
-            if profile.url == profileStatus.currentURL {
-              Label(profile.name, systemImage: "checkmark")
-            } else {
-              Text(profile.name)
+            HStack {
+              Text(refreshLabel(mode))
+              Spacer()
+              if mode.isCurrent { Text("当前").font(.caption2).foregroundStyle(.secondary) }
             }
           }
+          .buttonStyle(.plain)
+          .padding(.vertical, 3)
+          .disabled(controller.isBusy)
         }
-      } label: {
-        Label(profileStatus.currentName ?? "色彩描述文件", systemImage: "paintpalette")
-          .font(.caption)
-          .lineLimit(1)
       }
-      .disabled(busy)
-    }
-
-    if !display.isBuiltin, let contrast = controller.contrastByDisplay[display.id],
-      contrast.isAdjustable, let value = contrast.value
-    {
-      HStack {
-        Text("对比度").font(.caption)
-        Slider(
-          value: Binding(
-            get: { controller.contrastDrafts[display.id] ?? value },
-            set: { controller.contrastDrafts[display.id] = $0 }
-          ), in: 0...100,
-          onEditingChanged: { editing in
-            controller.contrastEditingChanged(for: display.id, editing: editing)
-          }
-        )
-        .disabled(busy)
-        Text("\(Int((controller.contrastDrafts[display.id] ?? value).rounded()))%")
-          .font(.caption.monospacedDigit())
-          .frame(width: 38, alignment: .trailing)
-      }
-    }
-
-    if !display.isBuiltin, let temperature = controller.temperatureByDisplay[display.id],
-      temperature.isAdjustable, let current = temperature.value
-    {
-      Menu {
-        ForEach([5000, 6500, 7500, 9300], id: \.self) { kelvin in
-          Button {
-            Task { await controller.setHardwareTemperature(kelvin, for: display.id) }
-          } label: {
-            if current == Double(kelvin) {
-              Label("\(kelvin) K", systemImage: "checkmark")
-            } else {
-              Text("\(kelvin) K")
-            }
-          }
-        }
-      } label: {
-        Label("色温 \(Int(current)) K", systemImage: "thermometer.medium")
-          .font(.caption)
-      }
-      .disabled(busy)
     }
   }
 
   private func topologyControls(_ display: DisplayInfo) -> some View {
-    HStack {
-      let relationship = controller.relationships[display.id]
+    let relationship = controller.relationships[display.id]
+    return VStack(alignment: .leading, spacing: 9) {
       Menu {
         ForEach(DisplayTopologyService.candidateRotations, id: \.self) { degrees in
           Button {
@@ -353,11 +383,9 @@ struct DisplayMenuView: View {
           }
         }
       } label: {
-        Label("旋转 \(relationship?.rotationDegrees ?? 0)°", systemImage: "rotate.right")
-          .font(.caption)
+        menuRow("旋转", icon: "rotate.right", value: "\(relationship?.rotationDegrees ?? 0)°")
       }
       .disabled(controller.isBusy || relationship == nil)
-
       Menu {
         Button {
           Task { await controller.setMirror(source: nil, for: display.id) }
@@ -384,96 +412,174 @@ struct DisplayMenuView: View {
           }
         }
       } label: {
-        Label("镜像", systemImage: "rectangle.on.rectangle")
-          .font(.caption)
+        menuRow("镜像", icon: "rectangle.on.rectangle", value: mirrorLabel(display))
       }
       .disabled(controller.isBusy || controller.displays.count < 2)
-      Spacer()
-      Button("断开") { Task { await controller.disconnect(display) } }
+    }
+  }
+
+  @ViewBuilder
+  private func colorControls(_ display: DisplayInfo) -> some View {
+    let busy = controller.isBusy || controller.busyDisplays.contains(display.id)
+    if !display.isBuiltin, let hdr = controller.hdrByDisplay[display.id],
+      hdr.isSupported, let enabled = hdr.isEnabled
+    {
+      stateRow("HDR", icon: "sun.max.fill", enabled: enabled, disabled: busy) {
+        Task { await controller.setHDR(!enabled, for: display.id) }
+      }
+    }
+    if let profileStatus = controller.profilesByDisplay[display.id], !profileStatus.profiles.isEmpty
+    {
+      Menu {
+        ForEach(profileStatus.profiles) { profile in
+          Button {
+            Task { await controller.setProfile(profile, for: display.id) }
+          } label: {
+            if profile.url == profileStatus.currentURL {
+              Label(profile.name, systemImage: "checkmark")
+            } else {
+              Text(profile.name)
+            }
+          }
+        }
+      } label: {
+        menuRow("色彩文件", icon: "paintpalette", value: profileStatus.currentName ?? "选择")
+      }
+      .disabled(busy)
+    }
+    if !display.isBuiltin, let contrast = controller.contrastByDisplay[display.id],
+      contrast.isAdjustable, let value = contrast.value
+    {
+      sliderRow(
+        "对比度",
+        value: Binding(
+          get: { controller.contrastDrafts[display.id] ?? value },
+          set: {
+            controller.contrastDrafts[display.id] = $0
+            controller.contrastDraftChanged(for: display.id)
+          }
+        ), range: 0...100, step: 1,
+        label: "\(Int((controller.contrastDrafts[display.id] ?? value).rounded()))%",
+        disabled: busy,
+        onEditingChanged: { controller.contrastEditingChanged(for: display.id, editing: $0) })
+    }
+    if !display.isBuiltin, let temperature = controller.temperatureByDisplay[display.id],
+      temperature.isAdjustable, let current = temperature.value
+    {
+      sliderRow(
+        "硬件色温",
+        value: Binding(
+          get: {
+            hardwareTemperatureIndex(controller.hardwareTemperatureDrafts[display.id] ?? current)
+          },
+          set: {
+            controller.hardwareTemperatureDrafts[display.id] =
+              hardwareTemperaturePresets[Int($0.rounded())]
+            controller.hardwareTemperatureDraftChanged(for: display.id)
+          }
+        ), range: 0...3, step: 1,
+        label: "\(Int((controller.hardwareTemperatureDrafts[display.id] ?? current).rounded())) K",
+        disabled: busy,
+        onEditingChanged: {
+          controller.hardwareTemperatureEditingChanged(for: display.id, editing: $0)
+        })
+    }
+  }
+
+  @ViewBuilder
+  private func softwareColorControls(_ display: DisplayInfo) -> some View {
+    if let status = controller.softwareByDisplay[display.id],
+      status.reason == nil || status.reason == "No app-managed transfer is active."
+    {
+      let busy = controller.isBusy || controller.busyDisplays.contains(display.id)
+      let hdr = controller.hdrByDisplay[display.id]?.isEnabled == true
+      sliderRow(
+        "软件色温",
+        value: Binding(
+          get: {
+            controller.softwareTemperatureDrafts[display.id] ?? Double(status.kelvin ?? 6500)
+          },
+          set: {
+            controller.softwareTemperatureDrafts[display.id] = $0
+            controller.setSoftwareTransferLive(for: display.id)
+          }
+        ), range: 4000...10000, step: 100,
+        label:
+          "\(Int((controller.softwareTemperatureDrafts[display.id] ?? Double(status.kelvin ?? 6500)).rounded())) K",
+        disabled: busy || hdr,
+        onEditingChanged: { if !$0 { controller.finishSoftwareTransferEditing(for: display.id) } })
+      sliderRow(
+        "Gamma",
+        value: Binding(
+          get: { controller.gammaDrafts[display.id] ?? status.gamma ?? 1.0 },
+          set: {
+            controller.gammaDrafts[display.id] = $0
+            controller.setSoftwareTransferLive(for: display.id)
+          }
+        ), range: 0.5...2.0, step: 0.01,
+        label: String(format: "%.2f", controller.gammaDrafts[display.id] ?? status.gamma ?? 1.0),
+        disabled: busy || hdr,
+        onEditingChanged: { if !$0 { controller.finishSoftwareTransferEditing(for: display.id) } })
+      Button("还原默认值") { controller.resetSoftwareTransfer(for: display.id) }
         .font(.caption)
-        .disabled(controller.isBusy || !controller.connectionSupported)
-        .help("暂时断开此显示器；至少保留一台活动显示器")
+        .disabled(busy || hdr)
+      if hdr {
+        Text("HDR 开启时无法调整软件 Gamma / 色温")
+          .font(.caption2).foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private func sliderRow(
+    _ title: String, value: Binding<Double>, range: ClosedRange<Double>,
+    step: Double, label: String, disabled: Bool,
+    onEditingChanged: @escaping (Bool) -> Void = { _ in }
+  ) -> some View {
+    HStack(spacing: 8) {
+      Text(title).font(.caption).frame(width: 60, alignment: .leading)
+      Slider(value: value, in: range, step: step, onEditingChanged: onEditingChanged)
+        .disabled(disabled)
+      Text(label).font(.caption.monospacedDigit()).frame(width: 56, alignment: .trailing)
     }
   }
 
   @ViewBuilder
   private func brightnessControl(_ display: DisplayInfo) -> some View {
     let status = controller.brightnessByDisplay[display.id]
-    HStack {
-      Image(systemName: "sun.min")
-        .foregroundStyle(.secondary)
-      Slider(
-        value: Binding(
-          get: { controller.brightnessDrafts[display.id] ?? status?.percent ?? 50 },
-          set: { controller.brightnessDrafts[display.id] = $0 }
-        ),
-        in: 0...100,
-        onEditingChanged: { editing in
-          controller.brightnessEditingChanged(for: display.id, editing: editing)
-        }
-      )
-      .disabled(
-        status?.isAdjustable != true || controller.busyDisplays.contains(display.id)
-          || controller.isBusy)
-      Image(systemName: "sun.max")
-        .foregroundStyle(.secondary)
-      Text(status?.percent.map { "\(Int($0.rounded()))%" } ?? "—")
-        .font(.caption.monospacedDigit())
-        .frame(width: 38, alignment: .trailing)
-    }
+    sliderRow(
+      "亮度",
+      value: Binding(
+        get: { controller.brightnessDrafts[display.id] ?? status?.percent ?? 50 },
+        set: { controller.brightnessDrafts[display.id] = $0 }
+      ), range: 0...100, step: 1,
+      label: status?.percent.map { "\(Int($0.rounded()))%" } ?? "—",
+      disabled: status?.isAdjustable != true || controller.busyDisplays.contains(display.id)
+        || controller.isBusy,
+      onEditingChanged: { controller.brightnessEditingChanged(for: display.id, editing: $0) }
+    )
     .help(status?.unavailableReason ?? "调节显示器亮度")
   }
 
-  @ViewBuilder
-  private func modeControls(_ display: DisplayInfo) -> some View {
-    let modes = controller.modesByDisplay[display.id] ?? []
-    let current = modes.first(where: \.isCurrent)
-    let key = current?.resolutionKey
-    let resolutions = DisplayModeCatalog.groupedResolutions(modes)
-    HStack {
-      Menu {
-        ForEach(resolutions, id: \.self) { resolution in
-          let options = DisplayModeCatalog.refreshChoices(for: resolution, in: modes)
-          if let mode = preferredMode(options, current: current) {
-            Button {
-              Task { await controller.setMode(mode, for: display.id) }
-            } label: {
-              if resolution == key {
-                Label(resolutionLabel(resolution), systemImage: "checkmark")
-              } else {
-                Text(resolutionLabel(resolution))
-              }
-            }
-          }
-        }
-      } label: {
-        Label(key.map(resolutionLabel) ?? "分辨率", systemImage: "rectangle.expand.vertical")
-          .font(.caption)
-      }
-      .disabled(resolutions.isEmpty || controller.isBusy)
-
+  private func menuRow(_ title: String, icon: String, value: String) -> some View {
+    HStack(spacing: 8) {
+      Image(systemName: icon).frame(width: 18)
+      Text(title)
       Spacer()
-
-      Menu {
-        if let key {
-          ForEach(distinctRefreshChoices(for: key, in: modes)) { mode in
-            Button {
-              Task { await controller.setMode(mode, for: display.id) }
-            } label: {
-              if mode.isCurrent {
-                Label(refreshLabel(mode), systemImage: "checkmark")
-              } else {
-                Text(refreshLabel(mode))
-              }
-            }
-          }
-        }
-      } label: {
-        Label(current.map(refreshLabel) ?? "刷新率", systemImage: "arrow.clockwise")
-          .font(.caption)
-      }
-      .disabled(key == nil || controller.isBusy)
+      Text(value).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+      Image(systemName: "chevron.down").font(.caption2).foregroundStyle(.secondary)
     }
+    .contentShape(Rectangle())
+  }
+
+  private func resolutionDetail(
+    _ key: ResolutionKey, mode: DisplayModeOption,
+    current: DisplayModeOption?, recommended: ResolutionKey?
+  ) -> String {
+    var parts: [String] = []
+    if key == recommended { parts.append("ClearDisplay 推荐") }
+    if key == current?.resolutionKey { parts.append("当前") }
+    if mode.isNative && !mode.isHiDPI { parts.append("原生") }
+    return parts.joined(separator: " · ")
   }
 
   private func preferredMode(_ options: [DisplayModeOption], current: DisplayModeOption?)
@@ -501,24 +607,53 @@ struct DisplayMenuView: View {
     return distinct
   }
 
+  private func relationshipLabel(_ display: DisplayInfo) -> String {
+    "\(mirrorLabel(display)) · \(controller.relationships[display.id]?.rotationDegrees ?? 0)°"
+  }
+
+  private func mirrorLabel(_ display: DisplayInfo) -> String {
+    guard let id = controller.relationships[display.id]?.mirrorsDisplayID else { return "扩展" }
+    return "镜像 \(controller.displays.first(where: { $0.id == id })?.name ?? "显示器")"
+  }
+
+  private func toggleExpansion(_ id: String) {
+    if expandedDisplays.contains(id) {
+      expandedDisplays.remove(id)
+    } else {
+      expandedDisplays.insert(id)
+    }
+  }
+
+  private func toggleSection(_ key: String) {
+    if expandedSections.contains(key) {
+      expandedSections.remove(key)
+    } else {
+      expandedSections.insert(key)
+    }
+  }
+
   private func resolutionLabel(_ key: ResolutionKey) -> String {
-    "\(key.width)×\(key.height)\(key.isHiDPI ? " HiDPI" : "")"
+    "\(key.width)×\(key.height)"
   }
 
   private func refreshLabel(_ mode: DisplayModeOption) -> String {
-    String(format: "%.2f Hz", mode.refreshRateHz)
+    refreshValue(mode.refreshRateHz)
+  }
+
+  private func refreshValue(_ hertz: Double) -> String {
+    hertz > 0 ? String(format: "%.2f Hz", hertz) : "刷新率未知"
   }
 
   private func dimensions(_ size: CGSize) -> String {
     "\(Int(size.width))×\(Int(size.height))"
   }
 
-  private var appearanceLabel: String {
-    switch controller.appearanceMode {
-    case .light: "浅色外观"
-    case .dark: "深色外观"
-    case .automatic: "自动外观"
-    case nil: "外观不可用"
+  private var hardwareTemperaturePresets: [Double] { [5000, 6500, 7500, 9300] }
+
+  private func hardwareTemperatureIndex(_ kelvin: Double) -> Double {
+    let closest = hardwareTemperaturePresets.enumerated().min {
+      abs($0.element - kelvin) < abs($1.element - kelvin)
     }
+    return Double(closest?.offset ?? 1)
   }
 }

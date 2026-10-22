@@ -78,6 +78,18 @@ enum DisplayModeCatalog {
     Array(Set(modes.filter(\.isSelectable).map(\.resolutionKey))).sorted()
   }
 
+  /// ClearDisplay's contextual recommendation keeps the current desktop size
+  /// while using HiDPI. This is an app recommendation, not a macOS default flag.
+  static func recommendedResolution(_ modes: [DisplayModeOption]) -> ResolutionKey? {
+    guard let current = modes.first(where: \.isCurrent) else { return nil }
+    return modes.first {
+      $0.isSelectable && $0.isHiDPI
+        && $0.logicalWidth == current.logicalWidth
+        && $0.logicalHeight == current.logicalHeight
+        && abs($0.refreshRateHz - current.refreshRateHz) < 0.01
+    }?.resolutionKey
+  }
+
   static func refreshChoices(for key: ResolutionKey, in modes: [DisplayModeOption])
     -> [DisplayModeOption]
   {
