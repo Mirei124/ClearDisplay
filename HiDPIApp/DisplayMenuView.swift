@@ -103,9 +103,6 @@ struct DisplayMenuView: View {
       }
       Divider()
       HStack {
-        Text("状态以系统读取结果为准")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
         Spacer()
         Button("退出") { NSApplication.shared.terminate(nil) }
           .buttonStyle(.borderless)
