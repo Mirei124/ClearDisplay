@@ -57,6 +57,10 @@ private let dsCanSet: (@convention(c) (CGDirectDisplayID) -> Bool)? = {
 }()
 
 enum DisplayBrightnessService {
+  // Brightness, contrast and color temperature share the same DDC/CI channel.
+  // Keep each write/read exchange intact when the menu loads them concurrently.
+  private static let ddcLock = NSLock()
+
   static func status(for displayID: CGDirectDisplayID) -> BrightnessStatus {
     guard CGDisplayIsOnline(displayID) != 0 else {
       return .init(
@@ -168,6 +172,18 @@ enum DisplayBrightnessService {
   }
 
   static func readVCP(_ code: UInt8, channel: IOAVServiceRef) -> (current: UInt16, max: UInt16)? {
+    ddcLock.lock()
+    defer { ddcLock.unlock() }
+    for attempt in 0..<2 {
+      if let value = readVCPOnce(code, channel: channel) { return value }
+      if attempt == 0 { Thread.sleep(forTimeInterval: 0.08) }
+    }
+    return nil
+  }
+
+  private static func readVCPOnce(
+    _ code: UInt8, channel: IOAVServiceRef
+  ) -> (current: UInt16, max: UInt16)? {
     var request: [UInt8] = [0x82, 0x01, code]
     request.append(request.reduce(UInt8(0x6E ^ 0x51), ^))
     guard
@@ -188,6 +204,8 @@ enum DisplayBrightnessService {
   }
 
   static func writeVCP(_ code: UInt8, channel: IOAVServiceRef, raw: UInt16) -> Bool {
+    ddcLock.lock()
+    defer { ddcLock.unlock() }
     var request: [UInt8] = [0x84, 0x03, code, UInt8(raw >> 8), UInt8(raw & 0xFF)]
     request.append(request.reduce(UInt8(0x6E ^ 0x51), ^))
     return IOAVServiceWriteI2C(channel, 0x37, 0x51, &request, UInt32(request.count))

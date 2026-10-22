@@ -19,6 +19,15 @@ No package manager or third party dependencies are required. The command line bu
 
 `swift format` ships with the installed Swift toolchain. Run `format.sh` after changing Swift files. `check.sh` compiles the app but does not change the active display mode.
 
+For UI inspection, a Debug build can open the same menu content in a normal window:
+
+```sh
+CONFIGURATION=debug ./build.sh ./build/preview
+HIDPI_UI_PREVIEW=1 ./build/preview/HiDPI.app/Contents/MacOS/HiDPI
+```
+
+The preview window is omitted from Release builds. Viewing it reads display state; using its controls changes the real display.
+
 The `Tests/` programs are manual hardware probes. CI runs formatting, C static warnings, plist validation and a full arm64 build; it does not change display settings.
 
 ## Current hardware limits
@@ -27,6 +36,12 @@ The `Tests/` programs are manual hardware probes. CI runs formatting, C static w
 - DDC controls are enabled only when one external display and one unambiguous DDC channel are present.
 - Software gamma and color temperature adjust the CoreGraphics transfer formula. The app saves a recovery snapshot and restores it on normal quit or a later launch. A custom original gamma table that cannot be represented as a formula cannot be fully restored by this path.
 - HDR uses the private MonitorPanel framework. Display controls should be tested again on each macOS release and monitor model.
+
+## Hardware QA before release
+
+On the target Mac, open the menu bar panel and verify that both screens have the right names, sizes and current values; the built-in screen must not show a HiDPI switch. For each available control, record the original setting, apply one small change, confirm the displayed readback, then restore it. In particular, check mode changes, brightness, layout/primary/rotation/mirroring, disconnect/reconnect, HDR, ICC, DDC contrast and temperature, and software gamma/temperature. Check the panel again after unplugging and reconnecting the external monitor. The bit-depth selector is deferred until a reliable current-value getter and setter are found.
+
+The app's manual smoke probes under `Tests/` cover backend behavior on one Mac with one external display. Multi-monitor DDC pairing and full menu visual behavior require additional hardware and UI QA.
 
 ## Direct distribution
 

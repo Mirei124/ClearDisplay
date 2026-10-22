@@ -6,7 +6,7 @@ app_bundle="${build_root}/HiDPI.app"
 sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
 configuration="${CONFIGURATION:-debug}"
 case "${configuration}" in
-  debug) swift_flags=(-g -Onone); clang_flags=(-g -O0) ;;
+  debug) swift_flags=(-g -Onone -D DEBUG); clang_flags=(-g -O0) ;;
   release) swift_flags=(-O -whole-module-optimization); clang_flags=(-O2) ;;
   *) print -u2 "CONFIGURATION must be debug or release"; exit 2 ;;
 esac
