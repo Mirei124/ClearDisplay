@@ -8,6 +8,7 @@ struct DisplayArrangementView: View {
   let onArrangementExpanded: () -> Void
   let onPrimaryExpanded: () -> Void
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var origins: [CGDirectDisplayID: CGPoint] = [:]
   @State private var primaryID: CGDirectDisplayID = 0
   @State private var pendingOffsets: [CGDirectDisplayID: CGPoint]?
@@ -58,6 +59,7 @@ struct DisplayArrangementView: View {
           arrangementContent
             .padding(.horizontal, 9)
             .padding(.bottom, 9)
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
         }
       }
       .background(
@@ -219,6 +221,7 @@ struct DisplayArrangementView: View {
           .padding(.vertical, 3)
           .disabled(controller.isBusy)
         }
+        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
       }
     }
     .background(

@@ -18,10 +18,12 @@ struct DisplayMenuView: View {
 
   @ObservedObject var controller: DisplayController
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var expandedDisplays: Set<String> = []
   @State private var expandedSection: MenuSection?
   @State private var arrangementExpanded = false
   @State private var primaryListExpanded = false
+  @State private var appeared = false
 
   private var menuContentHeight: CGFloat {
     var height: CGFloat =
@@ -112,6 +114,14 @@ struct DisplayMenuView: View {
       .padding(.vertical, 10)
     }
     .frame(width: 390)
+    .opacity(appeared ? 1 : 0)
+    .offset(y: appeared || reduceMotion ? 0 : -6)
+    .task {
+      await Task.yield()
+      guard !Task.isCancelled else { return }
+      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { appeared = true }
+    }
+    .onDisappear { appeared = false }
   }
 
   private func displayCard(_ display: DisplayInfo) -> some View {
@@ -186,6 +196,7 @@ struct DisplayMenuView: View {
         .padding(.leading, 16)
         .padding(.trailing, 16)
         .padding(.bottom, 14)
+        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
       }
     }
   }
@@ -341,6 +352,7 @@ struct DisplayMenuView: View {
         VStack(alignment: .leading, spacing: 9, content: content)
           .padding(.horizontal, 9)
           .padding(.bottom, 9)
+          .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
       }
     }
     .background(
