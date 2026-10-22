@@ -1,0 +1,33 @@
+# ClearDisplay: lessons and guardrails
+
+This is a record of issues found while building and testing ClearDisplay on one Apple Silicon Mac with a built-in display and one external display. Hardware behavior may differ elsewhere.
+
+## Display state and hardware
+
+| Area | What we learned | Rule for future changes |
+| --- | --- | --- |
+| HiDPI | The verified 1×/2× switch kept the external display's logical desktop size and refresh rate while changing render pixels. A mode ID is machine-specific. | Discover matching modes at runtime. Check logical dimensions, refresh rate, and relevant mode properties; apply and read back. Do not hard-code observed IDs or show a HiDPI switch on the built-in display. |
+| Color depth | CGS `depth` was 8 for both observed HiDPI and non-HiDPI modes. Registry and CGS snapshots did not reveal the BetterDisplay 8-bit YCbCr 4:4:4 change. | Do not treat CGS `depth`, BetterDisplay preferences, or unchanged registry fields as the current link bit depth. Do not add a clickable 8/10/12-bpc selector without a reliable current-state readback and reversible setter. This feature remains deferred. |
+| Display identity | Numeric display IDs can change or be reused after reconnection. | Match asynchronous results and worker tasks to a stable display identity before publishing or writing. Drop stale drafts and cancel old workers when a display disappears. |
+| DDC | Brightness, contrast, and hardware temperature share a slow monitor channel. Concurrent reads caused an apparently unavailable brightness control. | Serialize DDC transactions, keep retries bounded, and avoid ambiguous multi-monitor channel selection. Do not interpret a transient failed read as proof of missing hardware support. |
+| Software gamma | The app changes a CoreGraphics transfer curve and saves a recoverable baseline, but arbitrary original LUTs cannot always be reconstructed. | Preserve baseline recovery on normal exit and next launch. Do not promise exact restoration of every custom LUT. Disable these adjustments while HDR makes them unsuitable. |
+| True Tone | Crisp's observed control calls a system-level CoreBrightness client without a display ID. The external monitor did not expose an independent True Tone switch in macOS settings. | Present True Tone as a system control. Do not claim independent per-external-display switching or a verified visual effect on every external monitor. |
+| Layout and connection | Rotation can also change display arrangement. Disconnecting the only usable display would strand the UI. | Snapshot original mode and layout, read back each operation, and restore after a probe. Keep at least one usable display connected. Test reindexing and multi-external-display cases before claiming broad support. |
+
+## Menu UI regressions
+
+| Regression | Cause and fix | Do not repeat |
+| --- | --- | --- |
+| A dropdown occasionally seemed to ignore the first click. | Its visible 9-point padding was outside the `Button` label, leaving a dead border. The padding was moved inside the label before `contentShape`. | Do not put visual button padding outside the tappable label when the whole row looks clickable. |
+| Expanding Arrangement did not increase popup height. | Commit `263766f` replaced the direct, state-driven height with a `PreferenceKey` measurement of content inside `ScrollView`. The menu bar popup did not reliably resize from that measured value. Commit `935a253` restored a height derived from explicit expansion state. | Do not drive the menu bar popup height solely from a descendant `GeometryReader`/`PreferenceKey` measurement. Include new expanded sections in `menuContentHeight`, and verify in the real menu bar popup; the Debug preview is a separate window. |
+| The footer had too much empty space. | Height estimates were larger than the collapsed content. | Keep collapsed and expanded height contributions separate, and inspect the bottom of the real popup after changing controls. |
+| Accordion state could represent several open menus. | String keys in a set admitted invalid combinations. | Use the typed `MenuSection` state. Keep one leaf dropdown open at a time; the color-profile dropdown retains its Color & Image parent. Opening Arrangement closes Primary Display and section dropdowns; opening Primary Display closes section dropdowns. |
+| Expanded controls looked inconsistent. | Nested panels used mixed backgrounds and layout levels. | Keep expanded dropdown surfaces white, with the visible header and chevron aligned to the same row. Keep Reset and Apply next to Arrangement's title and hidden when Arrangement is collapsed. |
+
+## Verification and scope
+
+- `./check.sh` checks formatting, C warnings, plist validity, and an arm64 Debug build. It does **not** exercise display mutations or verify a menu bar popup's resizing.
+- The Debug preview reuses the production view but runs in a titled `NSWindow`; it can confirm content and click targets, while the real `MenuBarExtra` must be checked for popup sizing and animation.
+- Manual probes under `Tests/` can change physical display state. Record original values, make the smallest useful change, read back, and restore. Never run mutation probes as part of ordinary static checks.
+- Color-depth selection, virtual displays, picture-in-picture, streaming, and input-source switching are outside the current implementation scope. Do not add speculative controls for them.
+- macOS private interfaces used by HDR, Night Shift, and True Tone can change. Probe capability and verify the state reported by the system; do not infer success from a local toggle alone.

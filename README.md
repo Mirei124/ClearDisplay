@@ -2,6 +2,12 @@
 
 ClearDisplay is a macOS menu bar app for managing displays on Apple Silicon Macs. It brings resolution, refresh rate, brightness, display arrangement, and selected color controls into one panel. The app is still in development and is suitable for testing on your own hardware. A signed and notarized release is not available yet.
 
+## Screenshots
+
+This screenshot shows the running Debug preview, which uses the same controls as the menu bar panel. Available controls and values depend on the connected displays.
+
+<img src="docs/screenshots/display-arrangement.png" alt="Expanded display arrangement with external display controls and the primary-display selector" width="390">
+
 ## Requirements and installation
 
 - An Apple Silicon Mac running macOS 14 or later.
@@ -49,6 +55,8 @@ Install Xcode Command Line Tools with `xcode-select --install`. No third-party p
 CONFIGURATION=debug ./build.sh ./build/preview
 CLEARDISPLAY_UI_PREVIEW=1 ./build/preview/ClearDisplay.app/Contents/MacOS/ClearDisplay
 ```
+
+Project-specific implementation pitfalls and verification rules are recorded in [docs/lessons-learned.md](docs/lessons-learned.md).
 
 ## Packaging and release
 
