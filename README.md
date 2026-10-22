@@ -36,7 +36,7 @@ The `Tests/` programs are manual hardware probes. CI runs formatting, C static w
 - DDC controls are enabled only when one external display and one unambiguous DDC channel are present.
 - Software gamma and color temperature adjust the CoreGraphics transfer formula. The app saves a recovery snapshot and restores it on normal quit or a later launch. A custom original gamma table that cannot be represented as a formula cannot be fully restored by this path.
 - HDR uses the private MonitorPanel framework. Display controls should be tested again on each macOS release and monitor model.
-- Night Shift and integrated True Tone use private CoreBrightness interfaces. The True Tone switch is shown only for a supported built-in display; no external per-display setter has been verified.
+- Night Shift and True Tone use private CoreBrightness interfaces. True Tone is a system-level toggle like Crisp's, and is shown when CoreBrightness reports it supported and available. It does not independently control a particular external display; the visual effect on each external panel can vary.
 - System Light/Dark appearance is read from the current user's preferences and changed through System Events. The first change may request Automation access. Automatic appearance is recognized but cannot be set by the current service; while it is active, the menu leaves the system schedule intact.
 
 ## Hardware QA before release

@@ -32,7 +32,7 @@ final class DisplayController: ObservableObject {
   @Published private(set) var connectionSupported = false
   @Published private(set) var appearanceMode: SystemAppearanceMode?
   @Published private(set) var nightShiftState: DisplayNightShiftState?
-  @Published private(set) var trueToneByDisplay: [CGDirectDisplayID: DisplayTrueToneStatus] = [:]
+  @Published private(set) var trueToneStatus: DisplayTrueToneStatus?
   @Published private(set) var globalControlsBusy = false
   @Published private(set) var hdrByDisplay: [CGDirectDisplayID: DisplayHDRStatus] = [:]
   @Published private(set) var profilesByDisplay: [CGDirectDisplayID: DisplayColorProfileStatus] =
@@ -89,6 +89,7 @@ final class DisplayController: ObservableObject {
     if !globalControlsBusy {
       appearanceMode = try? DisplayAppearanceService.readMode()
       nightShiftState = try? nightShiftService?.readState()
+      trueToneStatus = DisplayTrueToneService.status()
     }
     let count = HDReadDisplays(nil, 0)
     guard count > 0 else {
@@ -102,7 +103,6 @@ final class DisplayController: ObservableObject {
       contrastByDisplay = [:]
       temperatureByDisplay = [:]
       softwareByDisplay = [:]
-      trueToneByDisplay = [:]
       Task {
         let service = DisplayConnectionService.shared
         let supported = await service.isSupported
@@ -151,11 +151,7 @@ final class DisplayController: ObservableObject {
     contrastByDisplay = contrastByDisplay.filter { ids.contains($0.key) }
     temperatureByDisplay = temperatureByDisplay.filter { ids.contains($0.key) }
     softwareByDisplay = softwareByDisplay.filter { ids.contains($0.key) }
-    trueToneByDisplay = trueToneByDisplay.filter { ids.contains($0.key) }
     for display in displays {
-      if !busyDisplays.contains(display.id) {
-        trueToneByDisplay[display.id] = DisplayTrueToneService.status(for: display.id)
-      }
       modesByDisplay[display.id] = DisplayModeCatalog.modes(for: display.id)
       if !busyDisplays.contains(display.id) { loadBrightness(for: display.id) }
       if !busyDisplays.contains(display.id) { loadColorControls(for: display.id) }
@@ -206,20 +202,18 @@ final class DisplayController: ObservableObject {
     }
   }
 
-  func setTrueTone(_ enabled: Bool, for id: CGDirectDisplayID) async {
-    guard !isBusy, !busyDisplays.contains(id),
-      let stableID = displays.first(where: { $0.id == id })?.stableID,
-      trueToneByDisplay[id]?.isSupported == true
+  func setTrueTone(_ enabled: Bool) async {
+    guard !isBusy, !globalControlsBusy,
+      trueToneStatus?.isSupported == true,
+      trueToneStatus?.isAvailable == true
     else { return }
-    busyDisplays.insert(id)
+    globalControlsBusy = true
     errorMessage = nil
     do {
-      let status = try await DisplayTrueToneService.setEnabled(enabled, for: id)
-      if displays.contains(where: { $0.id == id && $0.stableID == stableID }) {
-        trueToneByDisplay[id] = status
-      }
+      trueToneStatus = try await DisplayTrueToneService.setEnabled(enabled)
     } catch { errorMessage = error.localizedDescription }
-    busyDisplays.remove(id)
+    trueToneStatus = DisplayTrueToneService.status()
+    globalControlsBusy = false
     refresh()
   }
 

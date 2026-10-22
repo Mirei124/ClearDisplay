@@ -1,33 +1,30 @@
-import AppKit
-import CoreGraphics
 import Darwin
 import Foundation
 import ObjectiveC.runtime
 
 struct DisplayTrueToneStatus {
   let isSupported: Bool
+  let isAvailable: Bool
   let isEnabled: Bool?
   let unavailableReason: String?
 }
 
 enum DisplayTrueToneError: Error, LocalizedError {
   case unavailable(String)
-  case displayChanged
   case setterFailed
   case verificationFailed
 
   var errorDescription: String? {
     switch self {
     case .unavailable(let reason): reason
-    case .displayChanged: "The display changed while True Tone was being set."
     case .setterFailed: "macOS rejected the True Tone setting."
     case .verificationFailed: "The True Tone setting could not be verified."
     }
   }
 }
 
-/// CoreBrightness exposes a machine-wide client for integrated True Tone. It
-/// does not identify an external display, so external controls are unavailable.
+/// CoreBrightness exposes one machine-wide True Tone client. This does not
+/// control or report a setting for an individual display.
 @MainActor
 enum DisplayTrueToneService {
   private static let client: NSObject? = {
@@ -39,53 +36,51 @@ enum DisplayTrueToneService {
     return type.init()
   }()
 
-  static func status(for displayID: CGDirectDisplayID) -> DisplayTrueToneStatus {
-    guard CGDisplayIsOnline(displayID) != 0 else {
+  static func status() -> DisplayTrueToneStatus {
+    guard let client else {
       return .init(
-        isSupported: false, isEnabled: nil, unavailableReason: "Display is disconnected.")
+        isSupported: false, isAvailable: false, isEnabled: nil,
+        unavailableReason: "CoreBrightness is unavailable.")
     }
-    guard CGDisplayIsBuiltin(displayID) != 0 else {
-      return .init(
-        isSupported: false, isEnabled: nil,
-        unavailableReason: "Per-display True Tone is unavailable for this external display.")
+    let supported = read("supported", from: client) == true
+    let available = read("available", from: client) == true
+    let enabled = supported && available ? read("enabled", from: client) : nil
+    let reason: String?
+    if !supported {
+      reason = "True Tone is unsupported on this Mac."
+    } else if !available {
+      reason = "True Tone is currently unavailable."
+    } else if enabled == nil {
+      reason = "True Tone state could not be read."
+    } else {
+      reason = nil
     }
-    guard let client,
-      read("supportIntegrated", from: client) == true,
-      read("supported", from: client) == true,
-      read("available", from: client) == true,
-      let enabled = read("enabled", from: client)
-    else {
-      return .init(
-        isSupported: false, isEnabled: nil,
-        unavailableReason: "True Tone is unavailable for this display.")
-    }
-    return .init(isSupported: true, isEnabled: enabled, unavailableReason: nil)
+    return .init(
+      isSupported: supported, isAvailable: available, isEnabled: enabled,
+      unavailableReason: reason)
   }
 
   @discardableResult
-  static func setEnabled(_ enabled: Bool, for displayID: CGDirectDisplayID) async throws
+  static func setEnabled(_ enabled: Bool) async throws
     -> DisplayTrueToneStatus
   {
-    let before = status(for: displayID)
-    guard before.isSupported else {
+    let before = status()
+    guard before.isSupported && before.isAvailable && before.isEnabled != nil else {
       throw DisplayTrueToneError.unavailable(
         before.unavailableReason ?? "True Tone is unavailable.")
     }
-    guard let uuid = displayUUID(for: displayID), let client else {
-      throw DisplayTrueToneError.displayChanged
+    guard let client else {
+      throw DisplayTrueToneError.unavailable("CoreBrightness is unavailable.")
     }
     if before.isEnabled == enabled { return before }
     let selector = NSSelectorFromString("setEnabled:")
-    guard client.responds(to: selector), displayUUID(for: displayID) == uuid else {
-      throw DisplayTrueToneError.displayChanged
-    }
+    guard client.responds(to: selector) else { throw DisplayTrueToneError.setterFailed }
     typealias Setter = @convention(c) (NSObject, Selector, Bool) -> Bool
     let setter = unsafeBitCast(client.method(for: selector), to: Setter.self)
     guard setter(client, selector, enabled) else { throw DisplayTrueToneError.setterFailed }
     for _ in 0..<12 {
       try await Task.sleep(for: .milliseconds(100))
-      guard displayUUID(for: displayID) == uuid else { throw DisplayTrueToneError.displayChanged }
-      let after = status(for: displayID)
+      let after = status()
       if after.isEnabled == enabled { return after }
     }
     throw DisplayTrueToneError.verificationFailed
@@ -96,12 +91,5 @@ enum DisplayTrueToneService {
     guard client.responds(to: selector) else { return nil }
     typealias Getter = @convention(c) (NSObject, Selector) -> Bool
     return unsafeBitCast(client.method(for: selector), to: Getter.self)(client, selector)
-  }
-
-  private static func displayUUID(for id: CGDirectDisplayID) -> String? {
-    guard CGDisplayIsOnline(id) != 0, let raw = CGDisplayCreateUUIDFromDisplayID(id),
-      let string = CFUUIDCreateString(nil, raw.takeRetainedValue())
-    else { return nil }
-    return string as String
   }
 }

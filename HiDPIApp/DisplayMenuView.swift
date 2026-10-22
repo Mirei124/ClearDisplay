@@ -50,6 +50,21 @@ struct DisplayMenuView: View {
           .controlSize(.small)
           .disabled(controller.isBusy || controller.globalControlsBusy)
         }
+        if let trueTone = controller.trueToneStatus, trueTone.isSupported,
+          let enabled = trueTone.isEnabled
+        {
+          Toggle(
+            "原彩",
+            isOn: Binding(
+              get: { controller.trueToneStatus?.isEnabled ?? enabled },
+              set: { value in Task { await controller.setTrueTone(value) } }
+            )
+          )
+          .toggleStyle(.switch)
+          .controlSize(.small)
+          .disabled(controller.isBusy || controller.globalControlsBusy || !trueTone.isAvailable)
+          .help(trueTone.unavailableReason ?? "切换系统原彩显示")
+        }
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 10)
@@ -131,20 +146,6 @@ struct DisplayMenuView: View {
         .minimumScaleFactor(0.8)
 
       brightnessControl(display)
-      if let trueTone = controller.trueToneByDisplay[display.id],
-        trueTone.isSupported, let enabled = trueTone.isEnabled
-      {
-        Toggle(
-          "原彩显示",
-          isOn: Binding(
-            get: { controller.trueToneByDisplay[display.id]?.isEnabled ?? enabled },
-            set: { value in Task { await controller.setTrueTone(value, for: display.id) } }
-          )
-        )
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .disabled(controller.isBusy || controller.busyDisplays.contains(display.id))
-      }
       modeControls(display)
       topologyControls(display)
       colorControls(display)
