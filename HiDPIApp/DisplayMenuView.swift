@@ -23,6 +23,11 @@ struct DisplayMenuView: View {
         height += CGFloat(controller.displays.count) * 30
       }
       if expandedSections.contains("color-\(display.stableID)") { height += 250 }
+      if expandedSections.contains("color-\(display.stableID)")
+        && expandedSections.contains("profile-\(display.stableID)")
+      {
+        height += CGFloat(controller.profilesByDisplay[display.id]?.profiles.count ?? 1) * 30
+      }
     }
     if arrangementExpanded { height += 215 }
     if controller.launchAtLoginStatus.reason != nil { height += 22 }
@@ -67,6 +72,7 @@ struct DisplayMenuView: View {
       .frame(
         height: min(menuContentHeight, max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
       )
+      .animation(.easeInOut(duration: 0.18), value: menuContentHeight)
 
       if let error = controller.errorMessage {
         Divider()
@@ -457,26 +463,30 @@ struct DisplayMenuView: View {
       }
     }
     let profileStatus = controller.profilesByDisplay[display.id]
-    HStack(spacing: 8) {
-      Text("色彩文件").font(.caption).frame(width: 60, alignment: .leading)
-      Menu {
+    section(
+      "色彩文件", key: "profile-\(display.stableID)",
+      detail: profileStatus?.currentName ?? "未读取到当前配置"
+    ) {
+      if profileStatus?.profiles.isEmpty != false {
+        Text("暂无可选色彩文件").font(.caption2).foregroundStyle(.secondary)
+      } else {
         ForEach(profileStatus?.profiles ?? []) { profile in
           Button {
             Task { await controller.setProfile(profile, for: display.id) }
           } label: {
-            if profile.url == profileStatus?.currentURL {
-              Label(profile.name, systemImage: "checkmark")
-            } else {
+            HStack {
               Text(profile.name)
+              Spacer()
+              if profile.url == profileStatus?.currentURL {
+                Image(systemName: "checkmark").foregroundStyle(.secondary)
+              }
             }
           }
+          .buttonStyle(.plain)
+          .padding(.vertical, 3)
+          .disabled(busy)
         }
-      } label: {
-        Text(profileStatus?.currentName ?? "未读取到当前配置")
-          .lineLimit(1)
-          .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .disabled(busy || profileStatus?.profiles.isEmpty != false)
     }
     if !display.isBuiltin, let contrast = controller.contrastByDisplay[display.id],
       contrast.isAdjustable, let value = contrast.value
@@ -637,9 +647,7 @@ struct DisplayMenuView: View {
   }
 
   private func toggleExpansion(_ id: String) {
-    var transaction = Transaction(animation: nil)
-    transaction.disablesAnimations = true
-    withTransaction(transaction) {
+    withAnimation(.easeInOut(duration: 0.18)) {
       if expandedDisplays.contains(id) {
         expandedDisplays.remove(id)
       } else {
@@ -649,9 +657,7 @@ struct DisplayMenuView: View {
   }
 
   private func toggleSection(_ key: String) {
-    var transaction = Transaction(animation: nil)
-    transaction.disablesAnimations = true
-    withTransaction(transaction) {
+    withAnimation(.easeInOut(duration: 0.18)) {
       if expandedSections.contains(key) {
         expandedSections.remove(key)
       } else {
