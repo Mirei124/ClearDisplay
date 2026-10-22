@@ -13,5 +13,6 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>用于切换 macOS 的浅色与深色外观。</string>
 </dict>
 </plist>

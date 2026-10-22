@@ -23,6 +23,39 @@ struct DisplayMenuView: View {
 
       Divider()
 
+      HStack {
+        Menu {
+          Button("浅色") { controller.setAppearance(.light) }
+            .disabled(controller.appearanceMode == .automatic)
+          Button("深色") { controller.setAppearance(.dark) }
+            .disabled(controller.appearanceMode == .automatic)
+          Divider()
+          Text("自动外观请在系统设置中调整")
+        } label: {
+          Label(appearanceLabel, systemImage: "circle.lefthalf.filled")
+            .font(.caption)
+        }
+        .disabled(
+          controller.isBusy || controller.globalControlsBusy || controller.appearanceMode == nil)
+        Spacer()
+        if let nightShift = controller.nightShiftState, nightShift.isSupported {
+          Toggle(
+            "夜览",
+            isOn: Binding(
+              get: { controller.nightShiftState?.isEnabled ?? false },
+              set: { controller.setNightShift($0) }
+            )
+          )
+          .toggleStyle(.switch)
+          .controlSize(.small)
+          .disabled(controller.isBusy || controller.globalControlsBusy)
+        }
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 10)
+
+      Divider()
+
       if controller.displays.isEmpty && controller.disconnectedDisplays.isEmpty {
         ContentUnavailableView("未检测到显示器", systemImage: "display.slash")
           .frame(width: 320, height: 150)
@@ -98,6 +131,20 @@ struct DisplayMenuView: View {
         .minimumScaleFactor(0.8)
 
       brightnessControl(display)
+      if let trueTone = controller.trueToneByDisplay[display.id],
+        trueTone.isSupported, let enabled = trueTone.isEnabled
+      {
+        Toggle(
+          "原彩显示",
+          isOn: Binding(
+            get: { controller.trueToneByDisplay[display.id]?.isEnabled ?? enabled },
+            set: { value in Task { await controller.setTrueTone(value, for: display.id) } }
+          )
+        )
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .disabled(controller.isBusy || controller.busyDisplays.contains(display.id))
+      }
       modeControls(display)
       topologyControls(display)
       colorControls(display)
@@ -463,5 +510,14 @@ struct DisplayMenuView: View {
 
   private func dimensions(_ size: CGSize) -> String {
     "\(Int(size.width))×\(Int(size.height))"
+  }
+
+  private var appearanceLabel: String {
+    switch controller.appearanceMode {
+    case .light: "浅色外观"
+    case .dark: "深色外观"
+    case .automatic: "自动外观"
+    case nil: "外观不可用"
+    }
   }
 }
