@@ -2,9 +2,11 @@ import SwiftUI
 
 struct DisplayMenuView: View {
   @ObservedObject var controller: DisplayController
+  @Environment(\.colorScheme) private var colorScheme
   @State private var expandedDisplays: Set<String> = []
   @State private var expandedSections: Set<String> = []
   @State private var arrangementExpanded = false
+  @State private var primaryListExpanded = false
 
   private var menuContentHeight: CGFloat {
     var height: CGFloat =
@@ -29,7 +31,10 @@ struct DisplayMenuView: View {
         height += CGFloat(controller.profilesByDisplay[display.id]?.profiles.count ?? 1) * 30
       }
     }
-    if arrangementExpanded { height += 215 }
+    if arrangementExpanded {
+      height += 230
+      if primaryListExpanded { height += CGFloat(controller.layout.count) * 30 }
+    }
     if controller.launchAtLoginStatus.reason != nil { height += 22 }
     return height
   }
@@ -217,7 +222,10 @@ struct DisplayMenuView: View {
         .buttonStyle(.plain)
         .padding(9)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-        if arrangementExpanded { DisplayArrangementView(controller: controller) }
+        if arrangementExpanded {
+          DisplayArrangementView(
+            controller: controller, primaryListExpanded: $primaryListExpanded)
+        }
       }
       HStack(spacing: 8) {
         appearanceTile
@@ -311,7 +319,8 @@ struct DisplayMenuView: View {
     _ title: String, key: String, detail: String?,
     @ViewBuilder content: () -> Content
   ) -> some View {
-    VStack(alignment: .leading, spacing: 9) {
+    let expanded = expandedSections.contains(key)
+    return VStack(alignment: .leading, spacing: 9) {
       Button {
         toggleSection(key)
       } label: {
@@ -319,19 +328,24 @@ struct DisplayMenuView: View {
           Text(title).font(.caption.weight(.semibold))
           Spacer()
           if let detail { Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
-          Image(systemName: expandedSections.contains(key) ? "chevron.down" : "chevron.right")
+          Image(systemName: expanded ? "chevron.down" : "chevron.right")
             .font(.caption2)
         }
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
       .padding(9)
-      .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-      if expandedSections.contains(key) {
+      if expanded {
         VStack(alignment: .leading, spacing: 9, content: content)
-          .padding(.horizontal, 4)
+          .padding(.horizontal, 9)
+          .padding(.bottom, 9)
       }
     }
+    .background(
+      expanded ? Color.white : Color.secondary.opacity(0.1),
+      in: RoundedRectangle(cornerRadius: 8)
+    )
+    .environment(\.colorScheme, expanded ? .light : colorScheme)
   }
 
   private func resolutionControl(_ display: DisplayInfo) -> some View {

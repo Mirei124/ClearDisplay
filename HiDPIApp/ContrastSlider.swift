@@ -21,8 +21,12 @@ struct ContrastSlider: View {
 
       ZStack(alignment: .leading) {
         Capsule()
+          .fill(Color(white: 0.8))
+        Capsule()
           .fill(.white)
-          .overlay(Capsule().strokeBorder(Color.black.opacity(0.28), lineWidth: 1))
+          .frame(width: thumbSize / 2 + travel * fraction)
+        Capsule()
+          .strokeBorder(Color.black.opacity(0.28), lineWidth: 1)
         Text(displayValue)
           .font(.caption.monospacedDigit())
           .foregroundStyle(Color.black.opacity(0.7))

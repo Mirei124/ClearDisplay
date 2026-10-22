@@ -3,8 +3,11 @@ import SwiftUI
 
 struct DisplayArrangementView: View {
   @ObservedObject var controller: DisplayController
+  @Binding var primaryListExpanded: Bool
+  @Environment(\.colorScheme) private var colorScheme
   @State private var origins: [CGDirectDisplayID: CGPoint] = [:]
   @State private var primaryID: CGDirectDisplayID = 0
+  @State private var pendingOffsets: [CGDirectDisplayID: CGPoint]?
   @State private var draggingID: CGDirectDisplayID?
   @State private var dragStartOrigin: CGPoint?
   @State private var dragScale: CGFloat?
@@ -14,20 +17,22 @@ struct DisplayArrangementView: View {
 
   private var items: [DisplayLayoutItem] { controller.layout }
   private var hasChanges: Bool {
-    primaryID != items.first(where: \.isMain)?.id
-      || items.contains {
-        origins[$0.id] != $0.origin
-      }
+    items.contains { origins[$0.id] != $0.origin }
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      HStack {
+      HStack(spacing: 8) {
         Text("排列显示器").font(.subheadline.weight(.semibold))
         Spacer()
         Button("重置") { reset() }
           .disabled(!hasChanges || controller.isBusy)
+        Button("应用排列") {
+          Task { await controller.applyLayout(origins: origins, primaryID: primaryID) }
+        }
+        .disabled(!hasChanges || controller.isBusy)
       }
+      .buttonStyle(.borderless)
       if items.count < 2 {
         Text("连接两台或更多扩展显示器后可调整排列。")
           .font(.caption).foregroundStyle(.secondary)
@@ -116,25 +121,89 @@ struct DisplayArrangementView: View {
         }
         .frame(height: 130)
         .accessibilityLabel("拖动显示器方块以排列")
-        HStack {
-          Text("主显示器").font(.caption)
-          Picker("主显示器", selection: $primaryID) {
-            ForEach(items) { item in
-              Text(controller.displays.first(where: { $0.id == item.id })?.name ?? "显示器 \(item.id)")
-                .tag(item.id)
-            }
-          }
-          .labelsHidden()
-          Spacer()
-          Button("应用排列") {
-            Task { await controller.applyLayout(origins: origins, primaryID: primaryID) }
-          }
-          .disabled(!hasChanges || controller.isBusy)
-        }
+        primarySelector
       }
     }
     .onAppear(perform: reset)
-    .onChange(of: controller.layout) { _, _ in reset() }
+    .onChange(of: controller.layout) { _, updated in
+      if let pendingOffsets {
+        origins = Dictionary(
+          uniqueKeysWithValues: updated.map { item in
+            let offset = pendingOffsets[item.id] ?? .zero
+            return (item.id, CGPoint(x: item.origin.x + offset.x, y: item.origin.y + offset.y))
+          })
+        primaryID = updated.first(where: \.isMain)?.id ?? 0
+      } else {
+        reset()
+      }
+    }
+  }
+
+  private var primarySelector: some View {
+    VStack(alignment: .leading, spacing: 9) {
+      Button {
+        withAnimation(.easeInOut(duration: 0.18)) { primaryListExpanded.toggle() }
+      } label: {
+        HStack {
+          Text("主显示器").font(.caption.weight(.semibold))
+          Spacer()
+          Text(displayName(for: primaryID))
+            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+          Image(systemName: primaryListExpanded ? "chevron.down" : "chevron.right")
+            .font(.caption2)
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .padding(9)
+      if primaryListExpanded {
+        ForEach(items) { item in
+          Button {
+            selectPrimary(item.id)
+          } label: {
+            HStack {
+              Text(displayName(for: item.id))
+              Spacer()
+              if item.id == primaryID {
+                Image(systemName: "checkmark").foregroundStyle(.secondary)
+              }
+            }
+          }
+          .buttonStyle(.plain)
+          .padding(.horizontal, 9)
+          .padding(.vertical, 3)
+          .disabled(controller.isBusy)
+        }
+      }
+    }
+    .background(
+      primaryListExpanded ? Color.white : Color.secondary.opacity(0.1),
+      in: RoundedRectangle(cornerRadius: 8)
+    )
+    .environment(\.colorScheme, primaryListExpanded ? .light : colorScheme)
+  }
+
+  private func displayName(for id: CGDirectDisplayID) -> String {
+    controller.displays.first(where: { $0.id == id })?.name ?? "显示器 \(id)"
+  }
+
+  private func selectPrimary(_ id: CGDirectDisplayID) {
+    withAnimation(.easeInOut(duration: 0.18)) { primaryListExpanded = false }
+    guard id != items.first(where: \.isMain)?.id, !controller.isBusy else { return }
+    pendingOffsets = Dictionary(
+      uniqueKeysWithValues: items.map { item in
+        let draft = origins[item.id] ?? item.origin
+        return (item.id, CGPoint(x: draft.x - item.origin.x, y: draft.y - item.origin.y))
+      })
+    primaryID = id
+    let systemOrigins = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.origin) })
+    Task {
+      await controller.applyLayout(origins: systemOrigins, primaryID: id)
+      if controller.layout.first(where: \.isMain)?.id != id {
+        primaryID = controller.layout.first(where: \.isMain)?.id ?? 0
+      }
+      pendingOffsets = nil
+    }
   }
 
   private var layoutBounds: CGRect {
@@ -184,6 +253,8 @@ struct DisplayArrangementView: View {
   }
 
   private func reset() {
+    pendingOffsets = nil
+    primaryListExpanded = false
     dragBounds = nil
     verticalGuide = nil
     horizontalGuide = nil
