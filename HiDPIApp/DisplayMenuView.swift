@@ -72,13 +72,7 @@ struct DisplayMenuView: View {
         Button {
           toggleExpansion(display.stableID)
         } label: {
-          HStack(spacing: 10) {
-            Image(
-              systemName: expandedDisplays.contains(display.stableID)
-                ? "chevron.down" : "chevron.right"
-            )
-            .font(.caption.weight(.semibold))
-            .frame(width: 14)
+          HStack {
             VStack(alignment: .leading, spacing: 2) {
               Text(display.name).font(.subheadline.weight(.semibold)).lineLimit(1)
               Text(
@@ -93,6 +87,7 @@ struct DisplayMenuView: View {
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(expandedDisplays.contains(display.stableID) ? "已展开" : "已折叠")
         Toggle(
           "连接 \(display.name)",
           isOn: Binding(
@@ -140,7 +135,7 @@ struct DisplayMenuView: View {
             softwareColorControls(display)
           }
         }
-        .padding(.leading, 36)
+        .padding(.leading, 16)
         .padding(.trailing, 16)
         .padding(.bottom, 14)
       }
