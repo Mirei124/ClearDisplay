@@ -24,7 +24,7 @@ struct ContrastSlider: View {
           .fill(Color(white: 0.8))
         Capsule()
           .fill(.white)
-          .frame(width: thumbSize / 2 + travel * fraction)
+          .frame(width: thumbSize + travel * fraction)
         Capsule()
           .strokeBorder(Color.black.opacity(0.28), lineWidth: 1)
         Text(displayValue)
