@@ -17,5 +17,5 @@ Read [docs/lessons-learned.md](docs/lessons-learned.md) before changing display 
 
 ## Release
 
-- `package.sh` builds the Release app itself. Do not require a separate `build.sh` step.
+- `package.sh` and `package-dmg.sh` build the Release app themselves. Do not require a separate `build.sh` step.
 - Tag a committed release as `v<CFBundleShortVersionString>` after checking that the bundle version, README, docs, and worktree are ready. Do not move an existing release tag without explicit authorization.

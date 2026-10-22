@@ -13,7 +13,7 @@ This screenshot shows the running Debug preview, which uses the same controls as
 - An Apple Silicon Mac running macOS 14 or later.
 - Direct distribution outside the Mac App Store.
 
-To install a release archive, extract `ClearDisplay-VERSION-arm64.zip`, move `ClearDisplay.app` to Applications, and open it. ClearDisplay appears as a display icon in the menu bar and has no persistent main window. Click the icon to open its controls.
+To install from `ClearDisplay-VERSION-arm64.dmg`, open the image and drag `ClearDisplay.app` to the Applications shortcut. For the ZIP package, extract it and move `ClearDisplay.app` to Applications. Open the app from Applications; ClearDisplay appears as a display icon in the menu bar and has no persistent main window. Click the icon to open its controls.
 
 You can also build a test copy from source using the instructions below. macOS may require you to allow an unsigned build in System Settings → Privacy & Security before opening it.
 
@@ -60,14 +60,15 @@ Project-specific implementation pitfalls and verification rules are recorded in 
 
 ## Packaging and release
 
-`package.sh` runs a Release build itself; you do not need to run `build.sh` first.
+Both packaging scripts run a Release build themselves; you do not need to run `build.sh` first.
 
 ```sh
-ALLOW_UNSIGNED=1 ./package.sh
-SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./package.sh
-SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' NOTARY_PROFILE='ClearDisplay-notary' NOTARIZE=1 ./package.sh
+ALLOW_UNSIGNED=1 ./package.sh       # ZIP
+ALLOW_UNSIGNED=1 ./package-dmg.sh   # DMG with an Applications shortcut
+SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./package-dmg.sh
+SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' NOTARY_PROFILE='ClearDisplay-notary' NOTARIZE=1 ./package-dmg.sh
 ```
 
-The script produces `dist/ClearDisplay-VERSION-arm64.zip`. The unsigned archive is for local testing. Signing and notarization require your own Developer ID identity and local `notarytool` credentials; do not commit credentials to this repository. Before release, confirm the version and bundle ID in `HiDPIApp/Info.plist`, then verify signing, notarization, and display behavior on the target Mac.
+The scripts produce `dist/ClearDisplay-VERSION-arm64.zip` or `.dmg`. The DMG contains `ClearDisplay.app` and an Applications shortcut. Unsigned packages are for local testing. Signing and notarization require your own Developer ID identity and local `notarytool` credentials; do not commit credentials to this repository. Before release, confirm the version and bundle ID in `HiDPIApp/Info.plist`, then verify signing, notarization, and display behavior on the target Mac.
 
 Display modes, brightness, arrangement, mirroring, rotation, connection state, HDR, ICC profiles, DDC, and software image adjustments all require testing on real hardware. Record the original value, make a small change, confirm the readback, restore the original value, and check the result after reconnecting an external display. CI covers static checks and compilation; it does not change display settings.
