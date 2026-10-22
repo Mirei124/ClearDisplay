@@ -1,13 +1,5 @@
 import SwiftUI
 
-private struct MenuContentHeightKey: PreferenceKey {
-  static var defaultValue: CGFloat = 0
-
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-    value = nextValue()
-  }
-}
-
 struct DisplayMenuView: View {
   private enum MenuSection: Equatable {
     case resolution(String)
@@ -30,7 +22,35 @@ struct DisplayMenuView: View {
   @State private var expandedSection: MenuSection?
   @State private var arrangementExpanded = false
   @State private var primaryListExpanded = false
-  @State private var measuredContentHeight: CGFloat = 300
+
+  private var menuContentHeight: CGFloat {
+    var height: CGFloat =
+      160 + CGFloat(controller.displays.count + controller.disconnectedDisplays.count) * 55
+    for display in controller.displays where expandedDisplays.contains(display.stableID) {
+      height += 280
+      if MenuSection.resolution(display.stableID).isVisible(when: expandedSection) {
+        let modes = controller.modesByDisplay[display.id] ?? []
+        let density = modes.first(where: \.isCurrent)?.isHiDPI ?? display.hiDPIEnabled
+        let count = DisplayModeCatalog.desktopResolutions(modes, hiDPI: density).count
+        height += CGFloat(count) * 30
+      }
+      if MenuSection.refresh(display.stableID).isVisible(when: expandedSection) { height += 100 }
+      if MenuSection.rotation(display.stableID).isVisible(when: expandedSection) { height += 125 }
+      if MenuSection.mirror(display.stableID).isVisible(when: expandedSection) {
+        height += CGFloat(controller.displays.count) * 30
+      }
+      if MenuSection.color(display.stableID).isVisible(when: expandedSection) { height += 250 }
+      if MenuSection.profile(display.stableID).isVisible(when: expandedSection) {
+        height += CGFloat(controller.profilesByDisplay[display.id]?.profiles.count ?? 1) * 30
+      }
+    }
+    if !controller.layout.isEmpty {
+      height += arrangementExpanded ? 215 : 70
+      if primaryListExpanded { height += CGFloat(controller.layout.count) * 30 }
+    }
+    if controller.launchAtLoginStatus.reason != nil { height += 22 }
+    return height
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -67,22 +87,12 @@ struct DisplayMenuView: View {
           globalControls
         }
         .frame(width: 390)
-        .fixedSize(horizontal: false, vertical: true)
-        .background {
-          GeometryReader { geometry in
-            Color.clear.preference(key: MenuContentHeightKey.self, value: geometry.size.height)
-          }
-        }
       }
       .scrollIndicators(.hidden)
       .frame(
-        height: min(
-          measuredContentHeight, max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
+        height: min(menuContentHeight, max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
       )
-      .onPreferenceChange(MenuContentHeightKey.self) { height in
-        if height > 0 { measuredContentHeight = height }
-      }
-      .animation(.easeInOut(duration: 0.18), value: measuredContentHeight)
+      .animation(.easeInOut(duration: 0.18), value: menuContentHeight)
 
       if let error = controller.errorMessage {
         Divider()
