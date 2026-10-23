@@ -23,6 +23,9 @@ if [[ -n "${SIGN_IDENTITY:-}" ]]; then
   codesign --force --deep --options runtime --timestamp \
     --sign "${SIGN_IDENTITY}" "${app_path}"
   codesign --verify --deep --strict --verbose=2 "${app_path}"
+else
+  codesign --force --deep --sign - "${app_path}"
+  codesign --verify --deep --strict --verbose=2 "${app_path}"
 fi
 
 temporary="$(mktemp -d "${TMPDIR:-/tmp}/cleardisplay-dmg.XXXXXX")"

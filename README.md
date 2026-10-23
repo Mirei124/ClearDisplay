@@ -29,6 +29,8 @@ Open the menu bar panel and select the display you want to adjust. Controls appe
 
 The first Light or Dark appearance change may trigger a macOS Automation permission prompt. If you deny access, review ClearDisplay's permission in System Settings → Privacy & Security → Automation.
 
+Launch at Login is available when the running copy is in Applications. After moving the app there, quit any older copy started from a build folder or disk image and reopen it from Applications. If macOS requests approval, use System Settings → General → Login Items.
+
 ## Current limitations
 
 - Color-depth selection is still being investigated. There is no working 8/10/12 bpc selector.
@@ -69,6 +71,6 @@ SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./package-dmg.sh
 SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' NOTARY_PROFILE='ClearDisplay-notary' NOTARIZE=1 ./package-dmg.sh
 ```
 
-The scripts produce `dist/ClearDisplay-VERSION-arm64.zip` or `.dmg`. The DMG contains `ClearDisplay.app`, an Applications shortcut, and a custom mounted-volume icon. Regenerate the icon with `./tools/make-dmg-icon.sh` if its source changes. Unsigned packages are for local testing. Signing and notarization require your own Developer ID identity and local `notarytool` credentials; do not commit credentials to this repository. Before release, confirm the version and bundle ID in `HiDPIApp/Info.plist`, then verify signing, notarization, and display behavior on the target Mac.
+The scripts produce `dist/ClearDisplay-VERSION-arm64.zip` or `.dmg`. The DMG contains `ClearDisplay.app`, an Applications shortcut, and a custom mounted-volume icon. Regenerate the icon with `./tools/make-dmg-icon.sh` if its source changes. `ALLOW_UNSIGNED=1` applies a local ad hoc signature to the complete app bundle so macOS can verify it, but these packages remain unnotarized and are for local testing. Developer ID signing and notarization require your own signing identity and local `notarytool` credentials; do not commit credentials to this repository. Before release, confirm the version and bundle ID in `HiDPIApp/Info.plist`, then verify signing, notarization, and display behavior on the target Mac.
 
 Display modes, brightness, arrangement, mirroring, rotation, connection state, HDR, ICC profiles, DDC, and software image adjustments all require testing on real hardware. Record the original value, make a small change, confirm the readback, restore the original value, and check the result after reconnecting an external display. CI covers static checks and compilation; it does not change display settings.

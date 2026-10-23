@@ -12,16 +12,16 @@ enum LaunchAtLoginService {
     switch SMAppService.mainApp.status {
     case .enabled:
       return .init(isEnabled: true, isAvailable: true, reason: nil)
-    case .notRegistered:
-      return .init(isEnabled: false, isAvailable: true, reason: nil)
+    case .notRegistered, .notFound:
+      let installed = isInstalledInApplications
+      return .init(
+        isEnabled: false, isAvailable: installed,
+        reason: installed
+          ? nil : "当前运行的副本不在“应用程序”文件夹；请退出后从该文件夹重新打开 ClearDisplay。")
     case .requiresApproval:
       return .init(
         isEnabled: false, isAvailable: true,
         reason: "请在系统设置 → 通用 → 登录项中允许 ClearDisplay。")
-    case .notFound:
-      return .init(
-        isEnabled: false, isAvailable: false,
-        reason: "请先将 ClearDisplay.app 移到“应用程序”文件夹，再开启开机自启动。")
     @unknown default:
       return .init(
         isEnabled: false, isAvailable: false,
@@ -34,6 +34,18 @@ enum LaunchAtLoginService {
       try SMAppService.mainApp.register()
     } else {
       try SMAppService.mainApp.unregister()
+    }
+  }
+
+  private static var isInstalledInApplications: Bool {
+    let appURL = Bundle.main.bundleURL.resolvingSymlinksInPath()
+    let locations = [
+      URL(fileURLWithPath: "/Applications", isDirectory: true),
+      FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
+        "Applications", isDirectory: true),
+    ]
+    return locations.contains {
+      appURL.deletingLastPathComponent() == $0.resolvingSymlinksInPath()
     }
   }
 }

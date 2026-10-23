@@ -11,7 +11,10 @@ if [[ -n "${SIGN_IDENTITY:-}" ]]; then
   codesign --force --deep --options runtime --timestamp \
     --sign "${SIGN_IDENTITY}" "${app_path}"
   codesign --verify --deep --strict --verbose=2 "${app_path}"
-elif [[ "${ALLOW_UNSIGNED:-0}" != "1" ]]; then
+elif [[ "${ALLOW_UNSIGNED:-0}" == "1" ]]; then
+  codesign --force --deep --sign - "${app_path}"
+  codesign --verify --deep --strict --verbose=2 "${app_path}"
+else
   print -u2 "Set SIGN_IDENTITY to a Developer ID Application identity, or ALLOW_UNSIGNED=1 for local packaging."
   exit 2
 fi
