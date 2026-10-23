@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct DisplayMenuView: View {
@@ -24,7 +25,6 @@ struct DisplayMenuView: View {
   @State private var arrangementExpanded = false
   @State private var primaryListExpanded = false
   @State private var appeared = false
-  @State private var factoryResetDisplay: DisplayInfo?
 
   private var menuContentHeight: CGFloat {
     var height: CGFloat =
@@ -96,20 +96,6 @@ struct DisplayMenuView: View {
         height: min(menuContentHeight, max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
       )
       .animation(.easeInOut(duration: 0.18), value: menuContentHeight)
-      .confirmationDialog(
-        "恢复显示器出厂设置？",
-        isPresented: Binding(
-          get: { factoryResetDisplay != nil },
-          set: { if !$0 { factoryResetDisplay = nil } }
-        ), presenting: factoryResetDisplay
-      ) { display in
-        Button("恢复 \(display.name) 出厂设置", role: .destructive) {
-          factoryResetDisplay = nil
-          Task { await controller.restoreFactoryDefaults(for: display.id) }
-        }
-      } message: { _ in
-        Text("显示器可能同时重置亮度、对比度、色彩和其他菜单设置。此操作无法由 ClearDisplay 撤销。")
-      }
 
       if let error = controller.errorMessage {
         Divider()
@@ -207,7 +193,7 @@ struct DisplayMenuView: View {
             colorControls(display)
             softwareColorControls(display)
             if !display.isBuiltin {
-              Button("恢复显示器出厂设置") { factoryResetDisplay = display }
+              Button("恢复显示器出厂设置") { confirmFactoryReset(for: display) }
                 .font(.caption)
                 .disabled(
                   controller.isBusy || controller.busyDisplays.contains(display.id)
@@ -580,6 +566,18 @@ struct DisplayMenuView: View {
           controller.hardwareTemperatureEditingChanged(for: display.id, editing: $0)
         })
     }
+  }
+
+  private func confirmFactoryReset(for display: DisplayInfo) {
+    let alert = NSAlert()
+    alert.alertStyle = .critical
+    alert.messageText = "恢复 \(display.name) 出厂设置？"
+    alert.informativeText = "显示器可能同时重置亮度、对比度、色彩和其他菜单设置。此操作无法由 ClearDisplay 撤销。"
+    alert.addButton(withTitle: "取消")
+    alert.addButton(withTitle: "恢复出厂设置")
+    guard alert.runModal() == .alertSecondButtonReturn else { return }
+    // runModal returns only after AppKit has dismissed the alert.
+    Task { await controller.restoreFactoryDefaults(for: display.id) }
   }
 
   @ViewBuilder

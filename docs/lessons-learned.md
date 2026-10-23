@@ -23,6 +23,7 @@ This is a record of issues found while building and testing ClearDisplay on one 
 | The footer had too much empty space. | Height estimates were larger than the collapsed content. | Keep collapsed and expanded height contributions separate, and inspect the bottom of the real popup after changing controls. |
 | Accordion state could represent several open menus. | String keys in a set admitted invalid combinations. | Use the typed `MenuSection` state. Keep one leaf dropdown open at a time; the color-profile dropdown retains its Color & Image parent. Opening Arrangement closes Primary Display and section dropdowns; opening Primary Display closes section dropdowns. |
 | Expanded controls looked inconsistent. | Nested panels used mixed backgrounds and layout levels. | Keep expanded dropdown surfaces white, with the visible header and chevron aligned to the same row. Keep Reset and Apply next to Arrangement's title and hidden when Arrangement is collapsed. |
+| Factory reset confirmation stayed visible after pressing its action. | A SwiftUI `confirmationDialog` attached inside the menu bar popup did not reliably dismiss before the reset task began. | Use an AppKit `NSAlert` for this destructive confirmation; start the DDC task only after `runModal()` returns from the chosen button. |
 
 ## Verification and scope
 
