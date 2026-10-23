@@ -7,6 +7,7 @@ struct ContrastSlider: View {
   @Binding var value: Double
   let range: ClosedRange<Double>
   let step: Double
+  let tickLabels: [String]
   let onEditingChanged: (Bool) -> Void
 
   @State private var isDragging = false
@@ -14,51 +15,81 @@ struct ContrastSlider: View {
   private let thumbSize: CGFloat = 26
 
   var body: some View {
-    GeometryReader { geometry in
-      let travel = max(geometry.size.width - thumbSize, 1)
-      let fraction = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
-        .clamped(to: 0...1)
+    VStack(spacing: 3) {
+      GeometryReader { geometry in
+        let travel = max(geometry.size.width - thumbSize, 1)
+        let fraction = CGFloat((value - range.lowerBound) / (range.upperBound - range.lowerBound))
+          .clamped(to: 0...1)
 
-      ZStack(alignment: .leading) {
-        Capsule()
-          .fill(Color(white: 0.8))
-        Capsule()
-          .fill(.white)
-          .frame(width: thumbSize + travel * fraction)
-        Capsule()
-          .strokeBorder(Color.black.opacity(0.28), lineWidth: 1)
-        Text(displayValue)
-          .font(.caption.monospacedDigit())
-          .foregroundStyle(Color.black.opacity(0.7))
-          .padding(.horizontal, 14)
-          .frame(maxWidth: .infinity, alignment: fraction < 0.25 ? .trailing : .leading)
-          .allowsHitTesting(false)
-        Circle()
-          .fill(.white)
-          .overlay(Circle().strokeBorder(Color.black.opacity(0.34), lineWidth: 1))
-          .shadow(color: .black.opacity(0.22), radius: 2, y: 1)
-          .frame(width: thumbSize, height: thumbSize)
-          .offset(x: travel * fraction)
-      }
-      .frame(height: geometry.size.height)
-      .contentShape(Rectangle())
-      .gesture(
-        DragGesture(minimumDistance: 0)
-          .onChanged { drag in
-            if !isDragging {
-              isDragging = true
-              onEditingChanged(true)
+        ZStack(alignment: .leading) {
+          Capsule()
+            .fill(Color(white: 0.8))
+          Capsule()
+            .fill(.white)
+            .frame(width: thumbSize + travel * fraction)
+          Capsule()
+            .strokeBorder(Color.black.opacity(0.28), lineWidth: 1)
+          if tickLabels.count > 1 {
+            ForEach(tickLabels.indices, id: \.self) { index in
+              Capsule()
+                .fill(Color.black.opacity(0.24))
+                .frame(width: 2, height: 8)
+                .offset(
+                  x: thumbSize / 2 - 1 + travel * CGFloat(index)
+                    / CGFloat(tickLabels.count - 1)
+                )
+                .allowsHitTesting(false)
             }
-            let fraction = min(max((drag.location.x - thumbSize / 2) / travel, 0), 1)
-            setValue(range.lowerBound + Double(fraction) * (range.upperBound - range.lowerBound))
           }
-          .onEnded { _ in
-            isDragging = false
-            onEditingChanged(false)
+          Text(displayValue)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(Color.black.opacity(0.7))
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, alignment: fraction < 0.25 ? .trailing : .leading)
+            .allowsHitTesting(false)
+          Circle()
+            .fill(.white)
+            .overlay(Circle().strokeBorder(Color.black.opacity(0.34), lineWidth: 1))
+            .shadow(color: .black.opacity(0.22), radius: 2, y: 1)
+            .frame(width: thumbSize, height: thumbSize)
+            .offset(x: travel * fraction)
+        }
+        .frame(height: geometry.size.height)
+        .contentShape(Rectangle())
+        .gesture(
+          DragGesture(minimumDistance: 0)
+            .onChanged { drag in
+              if !isDragging {
+                isDragging = true
+                onEditingChanged(true)
+              }
+              let fraction = min(max((drag.location.x - thumbSize / 2) / travel, 0), 1)
+              setValue(range.lowerBound + Double(fraction) * (range.upperBound - range.lowerBound))
+            }
+            .onEnded { _ in
+              isDragging = false
+              onEditingChanged(false)
+            }
+        )
+      }
+      .frame(height: 28)
+      if tickLabels.count > 1 {
+        HStack(spacing: 0) {
+          ForEach(tickLabels.indices, id: \.self) { index in
+            Text(tickLabels[index])
+              .font(.system(size: 9, weight: .medium).monospacedDigit())
+              .foregroundStyle(.secondary)
+              .frame(
+                maxWidth: .infinity,
+                alignment: index == 0
+                  ? .leading
+                  : index == tickLabels.count - 1 ? .trailing : .center)
           }
-      )
+        }
+        .padding(.horizontal, thumbSize / 2)
+        .accessibilityHidden(true)
+      }
     }
-    .frame(height: 28)
     .opacity(isEnabled ? 1 : 0.5)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(title)

@@ -24,6 +24,7 @@ struct DisplayMenuView: View {
   @State private var arrangementExpanded = false
   @State private var primaryListExpanded = false
   @State private var appeared = false
+  @State private var factoryResetDisplay: DisplayInfo?
 
   private var menuContentHeight: CGFloat {
     var height: CGFloat =
@@ -41,7 +42,7 @@ struct DisplayMenuView: View {
       if MenuSection.mirror(display.stableID).isVisible(when: expandedSection) {
         height += CGFloat(controller.displays.count) * 30
       }
-      if MenuSection.color(display.stableID).isVisible(when: expandedSection) { height += 250 }
+      if MenuSection.color(display.stableID).isVisible(when: expandedSection) { height += 310 }
       if MenuSection.profile(display.stableID).isVisible(when: expandedSection) {
         height += CGFloat(controller.profilesByDisplay[display.id]?.profiles.count ?? 1) * 30
       }
@@ -95,6 +96,20 @@ struct DisplayMenuView: View {
         height: min(menuContentHeight, max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
       )
       .animation(.easeInOut(duration: 0.18), value: menuContentHeight)
+      .confirmationDialog(
+        "恢复显示器出厂设置？",
+        isPresented: Binding(
+          get: { factoryResetDisplay != nil },
+          set: { if !$0 { factoryResetDisplay = nil } }
+        ), presenting: factoryResetDisplay
+      ) { display in
+        Button("恢复 \(display.name) 出厂设置", role: .destructive) {
+          factoryResetDisplay = nil
+          Task { await controller.restoreFactoryDefaults(for: display.id) }
+        }
+      } message: { _ in
+        Text("显示器可能同时重置亮度、对比度、色彩和其他菜单设置。此操作无法由 ClearDisplay 撤销。")
+      }
 
       if let error = controller.errorMessage {
         Divider()
@@ -191,6 +206,16 @@ struct DisplayMenuView: View {
           ) {
             colorControls(display)
             softwareColorControls(display)
+            if !display.isBuiltin {
+              Button("恢复显示器出厂设置") { factoryResetDisplay = display }
+                .font(.caption)
+                .disabled(
+                  controller.isBusy || controller.busyDisplays.contains(display.id)
+                    || controller.brightnessByDisplay[display.id]?.isAdjustable != true
+                      && controller.contrastByDisplay[display.id]?.isAdjustable != true
+                      && controller.temperatureByDisplay[display.id]?.isAdjustable != true
+                )
+            }
           }
         }
         .padding(.leading, 16)
@@ -548,9 +573,9 @@ struct DisplayMenuView: View {
               hardwareTemperaturePresets[Int($0.rounded())]
             controller.hardwareTemperatureDraftChanged(for: display.id)
           }
-        ), range: 0...3, step: 1,
+        ), range: 0...Double(hardwareTemperaturePresets.count - 1), step: 1,
         label: "\(Int((controller.hardwareTemperatureDrafts[display.id] ?? current).rounded())) K",
-        disabled: busy,
+        disabled: busy, tickLabels: hardwareTemperaturePresets.map { String(Int($0)) },
         onEditingChanged: {
           controller.hardwareTemperatureEditingChanged(for: display.id, editing: $0)
         })
@@ -591,7 +616,7 @@ struct DisplayMenuView: View {
         label: String(format: "%.2f", controller.gammaDrafts[display.id] ?? status.gamma ?? 1.0),
         disabled: busy || hdr,
         onEditingChanged: { if !$0 { controller.finishSoftwareTransferEditing(for: display.id) } })
-      Button("还原默认值") { controller.resetSoftwareTransfer(for: display.id) }
+      Button("还原软件调整") { controller.resetSoftwareTransfer(for: display.id) }
         .font(.caption)
         .disabled(busy || hdr)
       if hdr {
@@ -603,14 +628,14 @@ struct DisplayMenuView: View {
 
   private func sliderRow(
     _ title: String, value: Binding<Double>, range: ClosedRange<Double>,
-    step: Double, label: String, disabled: Bool,
+    step: Double, label: String, disabled: Bool, tickLabels: [String] = [],
     onEditingChanged: @escaping (Bool) -> Void = { _ in }
   ) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       Text(title).font(.caption).foregroundStyle(.secondary)
       ContrastSlider(
         title: title, displayValue: label, value: value, range: range, step: step,
-        onEditingChanged: onEditingChanged
+        tickLabels: tickLabels, onEditingChanged: onEditingChanged
       )
       .disabled(disabled)
     }
@@ -716,7 +741,9 @@ struct DisplayMenuView: View {
     "\(Int(size.width))×\(Int(size.height))"
   }
 
-  private var hardwareTemperaturePresets: [Double] { [5000, 6500, 7500, 9300] }
+  private var hardwareTemperaturePresets: [Double] {
+    DisplayImageAdjustmentService.hardwareTemperaturePresets.values.sorted().map(Double.init)
+  }
 
   private func hardwareTemperatureIndex(_ kelvin: Double) -> Double {
     let closest = hardwareTemperaturePresets.enumerated().min {

@@ -24,6 +24,7 @@ Open the menu bar panel and select the display you want to adjust. Controls appe
 - **Resolution and HiDPI:** Switch HiDPI on an external display and choose a resolution from the list. The built-in display has no HiDPI switch. The apparent desktop size depends on the selected mode, so note your original setting before changing it.
 - **Refresh rate and image:** Choose an available refresh rate. On supported displays, adjust HDR, the color profile, software gamma, and color temperature.
 - **Brightness and DDC:** Adjust the built-in display's brightness. On a compatible external display, use DDC brightness, contrast, and color temperature controls.
+- **Factory reset:** On a compatible external monitor, the Color & Image section can send the MCCS factory-reset command after confirmation. This may reset brightness, contrast, color, geometry, and other monitor-menu settings. ClearDisplay then rereads available DDC values; the command itself is write-only, so a successful read does not prove every setting reached its factory value. "Restore software adjustments" only returns the app's gamma and software temperature controls to their neutral values.
 - **Arrangement and connections:** Drag displays in the layout view and apply their positions. Where available, set the primary display, rotate or mirror a display, and disconnect or reconnect it. Make sure another usable display remains connected before disconnecting one.
 - **System display settings:** Switch between Light and Dark appearance, toggle Night Shift, and toggle True Tone. True Tone is a system-wide setting rather than an independent switch for each external display. Its visible effect depends on macOS and the display.
 
@@ -35,6 +36,7 @@ Launch at Login is available when the running copy is in Applications. After mov
 
 - Color-depth selection is still being investigated. There is no working 8/10/12 bpc selector.
 - DDC controls are enabled only when there is one external display with an unambiguous DDC channel. Multiple external displays have not been validated.
+- The factory-reset command depends on monitor DDC support and cannot be undone by ClearDisplay. It does not reset macOS color profiles or other software settings.
 - Software gamma and color temperature change the CoreGraphics transfer curve. ClearDisplay attempts to restore the previous setting on normal exit or the next launch. Some custom original gamma tables cannot be fully restored by the current method.
 - HDR, Night Shift, and True Tone use private macOS interfaces and may need further verification after system updates. Automatic appearance can be detected, but ClearDisplay currently changes only Light and Dark appearance; it does not configure an automatic schedule.
 - Virtual displays, picture-in-picture, streaming, and display input-source switching are outside the current scope.

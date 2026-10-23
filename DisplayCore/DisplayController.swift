@@ -548,6 +548,36 @@ final class DisplayController: ObservableObject {
     busyDisplays.remove(id)
   }
 
+  func restoreFactoryDefaults(for id: CGDirectDisplayID) async {
+    guard !isBusy, !busyDisplays.contains(id),
+      let stableID = displays.first(where: { $0.id == id && !$0.isBuiltin })?.stableID
+    else { return }
+    // Prevent queued slider changes from overwriting the monitor's reset values.
+    cancelDDCWorker(for: id)
+    brightnessTasks[id]?.cancel()
+    brightnessTasks.removeValue(forKey: id)
+    brightnessWorkerIDs.removeValue(forKey: id)
+    pendingBrightness.removeValue(forKey: id)
+    brightnessDrafts.removeValue(forKey: id)
+    busyDisplays.insert(id)
+    errorMessage = nil
+    let result = await Task.detached(priority: .userInitiated) {
+      guard displayStableID(id) == stableID else {
+        return Result<Void, ImageAdjustmentError>.failure(
+          .unavailable("The display changed before the factory reset."))
+      }
+      return DisplayImageAdjustmentService.restoreFactoryDefaults(for: id)
+    }.value
+    guard displays.contains(where: { $0.id == id && $0.stableID == stableID }) else {
+      busyDisplays.remove(id)
+      refresh()
+      return
+    }
+    if case .failure(let error) = result { errorMessage = error.localizedDescription }
+    busyDisplays.remove(id)
+    refresh()
+  }
+
   func hardwareTemperatureEditingChanged(for id: CGDirectDisplayID, editing: Bool) {
     if editing {
       editingHardwareTemperature.insert(id)

@@ -30,6 +30,34 @@ enum ImageAdjustmentError: Error, LocalizedError {
 /// Call DDC methods off the main thread. DDC pairing intentionally fails closed
 /// when more than one external display is connected.
 enum DisplayImageAdjustmentService {
+  /// MCCS VCP 0x04 is a write-only factory reset. The monitor chooses the
+  /// resulting values; there is no DDC value to compare against beforehand.
+  static func restoreFactoryDefaults(for id: CGDirectDisplayID)
+    -> Result<Void, ImageAdjustmentError>
+  {
+    guard CGDisplayIsOnline(id) != 0, CGDisplayIsBuiltin(id) == 0,
+      let channel = DisplayBrightnessService.uniqueExternalChannel(for: id)
+    else { return .failure(.unavailable("No unambiguous DDC monitor is available.")) }
+    guard DisplayBrightnessService.writeVCP(0x04, channel: channel, raw: 1) else {
+      return .failure(.writeFailed)
+    }
+    // The command is write-only. Wait for the monitor to apply it, then require
+    // a fresh DDC response before reporting that the resulting state is readable.
+    Thread.sleep(forTimeInterval: 0.5)
+    for _ in 0..<4 {
+      if DisplayBrightnessService.readVCP(0x10, channel: channel) != nil
+        || DisplayBrightnessService.readVCP(0x12, channel: channel) != nil
+        || DisplayBrightnessService.readVCP(0x14, channel: channel) != nil
+      {
+        return .success(())
+      }
+      Thread.sleep(forTimeInterval: 0.25)
+    }
+    return .failure(
+      .unavailable(
+        "Factory reset was sent, but the monitor did not return a readable DDC value."))
+  }
+
   static func contrast(for id: CGDirectDisplayID) -> ImageAdjustmentStatus {
     guard CGDisplayIsOnline(id) != 0, CGDisplayIsBuiltin(id) == 0,
       let channel = DisplayBrightnessService.uniqueExternalChannel(for: id),
