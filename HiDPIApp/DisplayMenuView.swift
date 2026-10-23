@@ -48,7 +48,7 @@ struct DisplayMenuView: View {
       }
     }
     if !controller.layout.isEmpty {
-      height += arrangementExpanded ? 215 : 70
+      height += arrangementExpanded ? 209 : 64
       if primaryListExpanded { height += CGFloat(controller.layout.count) * 30 }
     }
     if controller.launchAtLoginStatus.reason != nil { height += 22 }

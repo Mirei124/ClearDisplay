@@ -54,7 +54,7 @@ struct DisplayArrangementView: View {
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 9)
-        .padding(.vertical, 9)
+        .padding(.vertical, 6)
         if arrangementExpanded {
           arrangementContent
             .padding(.horizontal, 9)
