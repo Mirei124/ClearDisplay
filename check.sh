@@ -7,3 +7,6 @@ for source in "${app_root}"/{DisplayCore,Tests}/*.c(N); do
 done
 plutil -lint "${app_root}/HiDPIApp/Info.plist"
 CONFIGURATION=debug "${app_root}/build.sh" "${app_root}/build/check"
+clang -arch arm64 -mmacosx-version-min=14.0 -Wall -Wextra -Werror \
+  "${app_root}/Tests/ModeCompatibilityTests.c" -o "${app_root}/build/check/ModeCompatibilityTests"
+"${app_root}/build/check/ModeCompatibilityTests"

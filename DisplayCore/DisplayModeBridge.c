@@ -1,4 +1,5 @@
 #include "DisplayModeBridge.h"
+#include "DisplayModeCompatibility.h"
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
@@ -63,9 +64,9 @@ static bool read_one(CGDirectDisplayID id, HDDisplayState *state) {
         CGSDisplayModeDescription mode = {0};
         if (CGSGetDisplayModeDescriptionOfLength(id, i, &mode, sizeof(mode)) != kCGErrorSuccess) continue;
         if (mode.width != state->logicalWidth || mode.height != state->logicalHeight ||
-            mode.freq != currentDescription.freq || mode.depth != currentDescription.depth ||
-            (mode.flags & 0x40000000u) ||
-            (mode.flags & 0x0000ffffu) != (currentDescription.flags & 0x0000ffffu)) continue;
+            mode.freq != currentDescription.freq ||
+            !HDModeAttributesCompatible(currentDescription.flags, currentDescription.depth,
+                                        mode.flags, mode.depth)) continue;
         bool hiDPI = mode.density >= 1.5f;
         uint32_t *candidate = hiDPI ? &state->highDPIModeID : &state->lowDPIModeID;
         bool *ambiguous = hiDPI ? &ambiguousHigh : &ambiguousLow;

@@ -1,4 +1,5 @@
 #include "DisplayModeCatalog.h"
+#include "DisplayModeCompatibility.h"
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
@@ -93,10 +94,8 @@ uint32_t HDEnumerateModes(CGDirectDisplayID display, HDModeOption *options, uint
         option.isHiDPI = density >= 1.5f;
         option.isCurrent = mode.modeNumber == currentID;
         option.isNative = nativeWidth && option.pixelWidth == nativeWidth && option.pixelHeight == nativeHeight;
-        // Mode IDs and undocumented flag bits vary by device. Only offer a
-        // candidate that matches the active color depth and flag family.
-        option.isSelectable = hasCurrentPrivate && mode.depth == currentPrivate.depth &&
-            (mode.flags & 0x0000ffffu) == (currentPrivate.flags & 0x0000ffffu);
+        option.isSelectable = hasCurrentPrivate && HDModeAttributesCompatible(
+            currentPrivate.flags, currentPrivate.depth, mode.flags, mode.depth);
         if (options && written < capacity) options[written] = option;
         ++written;
     }
@@ -125,8 +124,8 @@ HDModeApplyResult HDApplyMode(CGDirectDisplayID display, uint32_t modeID) {
         }
     }
     if (!found) return HDModeApplyModeGone;
-    if (candidate.depth != currentPrivate.depth ||
-        (candidate.flags & 0x0000ffffu) != (currentPrivate.flags & 0x0000ffffu))
+    if (!HDModeAttributesCompatible(currentPrivate.flags, currentPrivate.depth,
+                                    candidate.flags, candidate.depth))
         return HDModeApplyUnsafeColorChange;
     if (modeID == currentID) return HDModeApplyOK;
     CGDisplayConfigRef config = NULL;
