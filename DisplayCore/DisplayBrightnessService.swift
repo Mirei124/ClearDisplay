@@ -56,6 +56,18 @@ private let dsCanSet: (@convention(c) (CGDirectDisplayID) -> Bool)? = {
   return unsafeBitCast(symbol, to: (@convention(c) (CGDirectDisplayID) -> Bool).self)
 }()
 
+/// Owns the retained CoreFoundation service returned by IOAVServiceCreateWithService.
+/// A raw void pointer is not managed by Swift ARC; failing to release it leaks
+/// a kernel user client on every DDC read and write.
+final class DisplayDDCChannel {
+  fileprivate let service: IOAVServiceRef
+  fileprivate var lastIOError: IOReturn?
+
+  fileprivate init(_ service: IOAVServiceRef) { self.service = service }
+
+  deinit { Unmanaged<AnyObject>.fromOpaque(service).release() }
+}
+
 enum DisplayBrightnessService {
   // Brightness, contrast and color temperature share the same DDC/CI channel.
   // Keep each write/read exchange intact when the menu loads them concurrently.
@@ -90,9 +102,19 @@ enum DisplayBrightnessService {
         unavailableReason: "No unambiguous DDC/CI channel is available.")
     }
     guard let value = readBrightness(channel), value.max > 0, value.current <= value.max else {
+      let reason: String
+      if let code = channel.lastIOError {
+        reason =
+          String(
+            format: "The monitor did not respond to DDC/CI (I/O 0x%08X). ",
+            UInt32(bitPattern: code))
+          + "Check its DDC/CI menu setting and the display connection."
+      } else {
+        reason = "The monitor did not return a valid DDC/CI brightness value."
+      }
       return .init(
         source: .ddc, percent: nil, isAdjustable: false,
-        unavailableReason: "The monitor did not return a valid DDC/CI brightness value.")
+        unavailableReason: reason)
     }
     return .init(
       source: .ddc, percent: Double(value.current) / Double(value.max) * 100,
@@ -121,16 +143,25 @@ enum DisplayBrightnessService {
       let raw = UInt16((percent / 100 * Double(current.max)).rounded())
       guard writeBrightness(channel, raw: raw) else { return .failure(.writeFailed) }
     }
-    let after = status(for: displayID)
-    guard after.isAdjustable, let measured = after.percent,
-      abs(measured - percent) <= 3
-    else { return .failure(.verificationFailed) }
-    return .success(after)
+    // Some monitors apply a hardware fade; their first read can still be the
+    // preceding value. Retry briefly rather than treating that as a failed write.
+    let attempts = CGDisplayIsBuiltin(displayID) != 0 ? 1 : 4
+    for attempt in 0..<attempts {
+      if attempt > 0 { Thread.sleep(forTimeInterval: 0.15) }
+      let after = status(for: displayID)
+      if after.isAdjustable, let measured = after.percent, abs(measured - percent) <= 3 {
+        return .success(after)
+      }
+      if !after.isAdjustable {
+        return .failure(.unavailable(after.unavailableReason ?? "DDC readback is unavailable."))
+      }
+    }
+    return .failure(.verificationFailed)
   }
 
   /// A proxy cannot safely be assigned by enumeration order when multiple external
   /// displays are attached. This conservative P1 path only pairs one external to one proxy.
-  static func uniqueExternalChannel(for id: CGDirectDisplayID) -> IOAVServiceRef? {
+  static func uniqueExternalChannel(for id: CGDirectDisplayID) -> DisplayDDCChannel? {
     var count: UInt32 = 0
     guard CGGetOnlineDisplayList(0, nil, &count) == .success else { return nil }
     var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
@@ -148,7 +179,7 @@ enum DisplayBrightnessService {
         IOOptionBits(kIORegistryIterateRecursively), &iterator) == KERN_SUCCESS
     else { return nil }
     defer { IOObjectRelease(iterator) }
-    var channels: [IOAVServiceRef] = []
+    var channels: [DisplayDDCChannel] = []
     var entry = IOIteratorNext(iterator)
     while entry != IO_OBJECT_NULL {
       var className = [CChar](repeating: 0, count: 128)
@@ -162,7 +193,7 @@ enum DisplayBrightnessService {
         if location == nil || location == "External",
           let service = IOAVServiceCreateWithService(kCFAllocatorDefault, entry)
         {
-          channels.append(service)
+          channels.append(DisplayDDCChannel(service))
         }
       }
       IOObjectRelease(entry)
@@ -171,27 +202,36 @@ enum DisplayBrightnessService {
     return channels.count == 1 ? channels[0] : nil
   }
 
-  static func readVCP(_ code: UInt8, channel: IOAVServiceRef) -> (current: UInt16, max: UInt16)? {
+  static func readVCP(_ code: UInt8, channel: DisplayDDCChannel) -> (current: UInt16, max: UInt16)?
+  {
     ddcLock.lock()
     defer { ddcLock.unlock() }
     for attempt in 0..<2 {
+      let started = ProcessInfo.processInfo.systemUptime
       if let value = readVCPOnce(code, channel: channel) { return value }
+      // A blocked I2C call already waited for the driver timeout. Repeating it
+      // immediately keeps every queued slider operation waiting behind it.
+      if ProcessInfo.processInfo.systemUptime - started >= 3 { break }
       if attempt == 0 { Thread.sleep(forTimeInterval: 0.08) }
     }
     return nil
   }
 
   private static func readVCPOnce(
-    _ code: UInt8, channel: IOAVServiceRef
+    _ code: UInt8, channel: DisplayDDCChannel
   ) -> (current: UInt16, max: UInt16)? {
     var request: [UInt8] = [0x82, 0x01, code]
     request.append(request.reduce(UInt8(0x6E ^ 0x51), ^))
-    guard
-      IOAVServiceWriteI2C(channel, 0x37, 0x51, &request, UInt32(request.count)) == kIOReturnSuccess
-    else { return nil }
+    let writeResult = IOAVServiceWriteI2C(
+      channel.service, 0x37, 0x51, &request, UInt32(request.count))
+    channel.lastIOError = writeResult == kIOReturnSuccess ? nil : writeResult
+    guard writeResult == kIOReturnSuccess else { return nil }
     Thread.sleep(forTimeInterval: 0.04)
     var reply = [UInt8](repeating: 0, count: 12)
-    guard IOAVServiceReadI2C(channel, 0x37, 0x51, &reply, UInt32(reply.count)) == kIOReturnSuccess,
+    let readResult = IOAVServiceReadI2C(channel.service, 0x37, 0x51, &reply, UInt32(reply.count))
+    channel.lastIOError = readResult == kIOReturnSuccess ? nil : readResult
+    guard
+      readResult == kIOReturnSuccess,
       reply[0] == 0x6E, reply[1] == 0x88,
       reply[2] == 0x02, reply[3] == 0,
       reply[4] == code, reply[5] == 0,
@@ -203,20 +243,22 @@ enum DisplayBrightnessService {
     )
   }
 
-  static func writeVCP(_ code: UInt8, channel: IOAVServiceRef, raw: UInt16) -> Bool {
+  static func writeVCP(_ code: UInt8, channel: DisplayDDCChannel, raw: UInt16) -> Bool {
     ddcLock.lock()
     defer { ddcLock.unlock() }
     var request: [UInt8] = [0x84, 0x03, code, UInt8(raw >> 8), UInt8(raw & 0xFF)]
     request.append(request.reduce(UInt8(0x6E ^ 0x51), ^))
-    return IOAVServiceWriteI2C(channel, 0x37, 0x51, &request, UInt32(request.count))
+    return IOAVServiceWriteI2C(channel.service, 0x37, 0x51, &request, UInt32(request.count))
       == kIOReturnSuccess
   }
 
-  private static func readBrightness(_ channel: IOAVServiceRef) -> (current: UInt16, max: UInt16)? {
+  private static func readBrightness(_ channel: DisplayDDCChannel) -> (
+    current: UInt16, max: UInt16
+  )? {
     readVCP(0x10, channel: channel)
   }
 
-  private static func writeBrightness(_ channel: IOAVServiceRef, raw: UInt16) -> Bool {
+  private static func writeBrightness(_ channel: DisplayDDCChannel, raw: UInt16) -> Bool {
     writeVCP(0x10, channel: channel, raw: raw)
   }
 }

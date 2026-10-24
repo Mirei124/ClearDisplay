@@ -669,6 +669,8 @@ final class DisplayController: ObservableObject {
       brightnessByDisplay[id] = status
       if let percent = status.percent, !busyDisplays.contains(id), !editingBrightness.contains(id) {
         brightnessDrafts[id] = percent
+      } else if !status.isAdjustable, !editingBrightness.contains(id) {
+        brightnessDrafts.removeValue(forKey: id)
       }
     }
   }
@@ -690,16 +692,21 @@ final class DisplayController: ObservableObject {
     else { return }
     pendingBrightness[id] = percent
     guard brightnessTasks[id] == nil else { return }
+    errorMessage = nil
     brightnessWorkerIDs[id] = stableID
     brightnessTasks[id] = Task { [weak self] in
-      while let self, !Task.isCancelled {
+      brightnessLoop: while let self, !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(40))
         guard !Task.isCancelled,
           self.displays.contains(where: { $0.id == id && $0.stableID == stableID }),
           let next = self.pendingBrightness.removeValue(forKey: id)
         else { break }
         let result = await Task.detached(priority: .userInitiated) {
-          DisplayBrightnessService.setPercent(next, for: id)
+          guard displayStableID(id) == stableID else {
+            return Result<BrightnessStatus, BrightnessError>.failure(
+              .unavailable("The display changed before the brightness write."))
+          }
+          return DisplayBrightnessService.setPercent(next, for: id)
         }.value
         guard self.displays.contains(where: { $0.id == id && $0.stableID == stableID }) else {
           break
@@ -712,7 +719,13 @@ final class DisplayController: ObservableObject {
           }
         case .failure(let error):
           self.errorMessage = error.localizedDescription
-          break
+          self.brightnessByDisplay[id] = .init(
+            source: self.brightnessByDisplay[id]?.source, percent: nil, isAdjustable: false,
+            unavailableReason: error.localizedDescription)
+          self.brightnessDrafts.removeValue(forKey: id)
+          self.pendingBrightness.removeValue(forKey: id)
+          self.editingBrightness.remove(id)
+          break brightnessLoop
         }
       }
       if self?.brightnessWorkerIDs[id] == stableID {
