@@ -20,6 +20,8 @@ typedef enum {
 uint32_t HDAllDisplayIDs(CGDirectDisplayID *ids, uint32_t capacity);
 bool HDConnectionSupported(void);
 bool HDDisplayIsEnabled(CGDirectDisplayID displayID);
+// Returns false on enumeration failure, distinct from a successful zero count.
+bool HDGetActivePhysicalDisplayCount(uint32_t *count);
 HDConnectionResult HDSetDisplayEnabled(CGDirectDisplayID displayID, bool enabled);
 
 #endif

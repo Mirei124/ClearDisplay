@@ -57,26 +57,33 @@ bool HDDisplayIsEnabled(CGDirectDisplayID displayID) {
     return CGDisplayIsOnline(displayID) != 0 && CGDisplayIsActive(displayID) != 0;
 }
 
-static uint32_t HDActivePhysicalDisplayCount(void) {
+bool HDGetActivePhysicalDisplayCount(uint32_t *physicalCount) {
+    if (physicalCount == NULL) return false;
+    *physicalCount = 0;
     uint32_t count = 0;
-    if (CGGetActiveDisplayList(0, NULL, &count) != kCGErrorSuccess || count == 0 || count > 256) return 0;
+    if (CGGetActiveDisplayList(0, NULL, &count) != kCGErrorSuccess || count > 256) return false;
+    if (count == 0) return true;
     CGDirectDisplayID ids[256] = {0};
     uint32_t actual = 0;
-    if (CGGetActiveDisplayList(count, ids, &actual) != kCGErrorSuccess) return 0;
+    if (CGGetActiveDisplayList(count, ids, &actual) != kCGErrorSuccess) return false;
     uint32_t physical = 0;
     for (uint32_t index = 0; index < actual && index < count; ++index) {
         CGDirectDisplayID id = ids[index];
-        if (CGDisplayVendorNumber(id) > 0 && CGDisplayVendorNumber(id) <= 0xFFFF &&
-            CGDisplayModelNumber(id) > 0 && CGDisplayModelNumber(id) <= 0xFFFF) physical++;
+        if (CGDisplayIsBuiltin(id) ||
+            (CGDisplayVendorNumber(id) > 0 && CGDisplayVendorNumber(id) <= 0xFFFF &&
+             CGDisplayModelNumber(id) > 0 && CGDisplayModelNumber(id) <= 0xFFFF)) physical++;
     }
-    return physical;
+    *physicalCount = physical;
+    return true;
 }
 
 HDConnectionResult HDSetDisplayEnabled(CGDirectDisplayID displayID, bool enabled) {
     if (!HDConnectionSupported()) return HDConnectionUnsupported;
     if (!HDKnownDisplay(displayID)) return HDConnectionDisplayGone;
     if (HDDisplayIsEnabled(displayID) == enabled) return HDConnectionOK;
-    if (!enabled && HDActivePhysicalDisplayCount() <= 1) return HDConnectionLastDisplay;
+    uint32_t physicalCount = 0;
+    if (!enabled && (!HDGetActivePhysicalDisplayCount(&physicalCount) || physicalCount <= 1))
+        return HDConnectionLastDisplay;
 
     CGDisplayConfigRef config = NULL;
     if (CGBeginDisplayConfiguration(&config) != kCGErrorSuccess || config == NULL)

@@ -64,6 +64,7 @@ final class DisplayController: ObservableObject {
   private var softwareTransferTasks: [CGDirectDisplayID: Task<Void, Never>] = [:]
   private var refreshGeneration = 0
   private var reconfigurationObserver: NSObjectProtocol?
+  private var builtinRecoveryTask: Task<Void, Never>?
 
   init() {
     _ = softwareTransfer.recoverPending()
@@ -75,6 +76,7 @@ final class DisplayController: ObservableObject {
         guard let self else { return }
         _ = self.softwareTransfer.recoverPending()
         self.refresh()
+        self.scheduleBuiltinRecovery()
       }
     }
     terminationObserver = NotificationCenter.default.addObserver(
@@ -86,9 +88,11 @@ final class DisplayController: ObservableObject {
       }
     }
     refresh()
+    scheduleBuiltinRecovery()
   }
 
   deinit {
+    builtinRecoveryTask?.cancel()
     for task in brightnessTasks.values { task.cancel() }
     for task in softwareTransferTasks.values { task.cancel() }
     for task in ddcTasks.values { task.cancel() }
@@ -97,6 +101,31 @@ final class DisplayController: ObservableObject {
       NotificationCenter.default.removeObserver(reconfigurationObserver)
     }
     if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
+  }
+
+  private func scheduleBuiltinRecovery() {
+    builtinRecoveryTask?.cancel()
+    builtinRecoveryTask = Task { @MainActor [weak self] in
+      var lastError: Error?
+      // Coalesce hotplug callbacks and allow WindowServer to finish publishing
+      // the topology. Retry briefly if its disabled-display list is not ready.
+      for delay in [350, 750, 1500] {
+        do { try await Task.sleep(for: .milliseconds(delay)) } catch { return }
+        guard !Task.isCancelled else { return }
+        do {
+          if try await DisplayConnectionService.shared.recoverBuiltinIfNeeded() {
+            self?.refresh()
+            return
+          }
+          lastError = nil
+        } catch {
+          lastError = error
+        }
+      }
+      if let lastError, !Task.isCancelled {
+        self?.errorMessage = "无法自动恢复内建显示器：\(lastError.localizedDescription)"
+      }
+    }
   }
 
   func refresh() {

@@ -10,3 +10,12 @@ CONFIGURATION=debug "${app_root}/build.sh" "${app_root}/build/check"
 clang -arch arm64 -mmacosx-version-min=14.0 -Wall -Wextra -Werror \
   "${app_root}/Tests/ModeCompatibilityTests.c" -o "${app_root}/build/check/ModeCompatibilityTests"
 "${app_root}/build/check/ModeCompatibilityTests"
+swiftc -target arm64-apple-macos14.0 \
+  -module-cache-path "${app_root}/build/check/ModuleCache" \
+  -import-objc-header "${app_root}/DisplayCore/DisplayConnectionBridge.h" \
+  "${app_root}/DisplayCore/DisplayConnectionService.swift" \
+  "${app_root}/Tests/DisplayRecoveryTests.swift" \
+  "${app_root}/build/check/DisplayConnectionBridge.o" \
+  -framework CoreGraphics -framework ColorSync \
+  -o "${app_root}/build/check/DisplayRecoveryTests"
+"${app_root}/build/check/DisplayRecoveryTests"
