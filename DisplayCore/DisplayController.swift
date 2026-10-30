@@ -65,6 +65,7 @@ final class DisplayController: ObservableObject {
   private var refreshGeneration = 0
   private var reconfigurationObserver: NSObjectProtocol?
   private var builtinRecoveryTask: Task<Void, Never>?
+  private var wakeObserver: DisplayWakeObserver?
 
   init() {
     _ = softwareTransfer.recoverPending()
@@ -78,6 +79,10 @@ final class DisplayController: ObservableObject {
         self.refresh()
         self.scheduleBuiltinRecovery()
       }
+    }
+    wakeObserver = DisplayWakeObserver { [weak self] in
+      self?.refresh()
+      self?.scheduleBuiltinRecovery()
     }
     terminationObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.willTerminateNotification, object: nil, queue: .main
@@ -109,7 +114,7 @@ final class DisplayController: ObservableObject {
       var lastError: Error?
       // Coalesce hotplug callbacks and allow WindowServer to finish publishing
       // the topology. Retry briefly if its disabled-display list is not ready.
-      for delay in [350, 750, 1500] {
+      for delay in [350, 750, 1500, 2500, 5000] {
         do { try await Task.sleep(for: .milliseconds(delay)) } catch { return }
         guard !Task.isCancelled else { return }
         do {

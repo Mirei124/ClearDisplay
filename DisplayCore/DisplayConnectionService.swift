@@ -1,6 +1,7 @@
 import ColorSync
 import CoreGraphics
 import Foundation
+import IOKit
 
 struct DisconnectedDisplay: Codable, Identifiable, Equatable {
   let id: String  // CGDisplay UUID; the numeric ID can change after reconnect.
@@ -43,6 +44,7 @@ actor DisplayConnectionService {
     var isEnabled: (CGDirectDisplayID) -> Bool
     var uuid: (CGDirectDisplayID) -> String?
     var activePhysicalCount: () -> UInt32?
+    var lidIsClosed: () -> Bool? = { nil }
     var setEnabled: (CGDirectDisplayID, Bool) -> HDConnectionResult
 
     static var live: Backend {
@@ -52,7 +54,8 @@ actor DisplayConnectionService {
         activePhysicalCount: {
           var count: UInt32 = 0
           return HDGetActivePhysicalDisplayCount(&count) ? count : nil
-        }, setEnabled: { HDSetDisplayEnabled($0, $1) })
+        }, lidIsClosed: { DisplayConnectionService.lidIsClosed() },
+        setEnabled: { HDSetDisplayEnabled($0, $1) })
     }
   }
   static let shared = DisplayConnectionService()
@@ -105,16 +108,20 @@ actor DisplayConnectionService {
   /// failed enumeration is not evidence that the user has no usable screen.
   @discardableResult
   func recoverBuiltinIfNeeded() throws -> Bool {
-    guard backend.isSupported(), backend.activePhysicalCount() == 0 else { return false }
+    guard backend.isSupported(), backend.lidIsClosed() != true,
+      backend.activePhysicalCount() == 0
+    else { return false }
     reconcile()
     let ids = backend.allIDs()
     guard let record = records.first(where: { $0.isBuiltin }),
       let id = resolveID(for: record, among: ids), !backend.isEnabled(id),
-      backend.activePhysicalCount() == 0
+      backend.activePhysicalCount() == 0, backend.lidIsClosed() != true
     else { return false }
     let result = backend.setEnabled(id, true)
     guard result == HDConnectionOK else { throw Self.error(for: result) }
-    guard backend.isEnabled(id) else { throw DisplayConnectionError.verificationFailed }
+    guard backend.isEnabled(id), backend.lidIsClosed() != true,
+      let activeCount = backend.activePhysicalCount(), activeCount > 0
+    else { throw DisplayConnectionError.verificationFailed }
     records.removeAll { $0.id == record.id }
     persist()
     return true
@@ -129,9 +136,16 @@ actor DisplayConnectionService {
         // A temporary enumeration gap must not erase our only reconnect handle.
         return record
       }
-      guard !backend.isEnabled(id) else { return nil }
       var updated = record
       updated.lastDisplayID = id
+      // An enabled flag during closed-lid/sleep transitions is not evidence
+      // that the user can see the internal panel. Keep the recovery handle.
+      if record.isBuiltin {
+        guard backend.lidIsClosed() != true,
+          let activeCount = backend.activePhysicalCount(), activeCount > 0
+        else { return updated }
+      }
+      guard !backend.isEnabled(id) else { return nil }
       return updated
     }
     persist()
@@ -165,6 +179,16 @@ actor DisplayConnectionService {
   private static func uuid(for id: CGDirectDisplayID) -> String? {
     guard let raw = CGDisplayCreateUUIDFromDisplayID(id) else { return nil }
     return CFUUIDCreateString(nil, raw.takeRetainedValue()) as String
+  }
+
+  private static func lidIsClosed() -> Bool? {
+    let service = IOServiceGetMatchingService(
+      kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+    guard service != IO_OBJECT_NULL else { return nil }
+    defer { IOObjectRelease(service) }
+    return IORegistryEntryCreateCFProperty(
+      service, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0
+    )?.takeRetainedValue() as? Bool
   }
 
   private static func error(for result: HDConnectionResult) -> DisplayConnectionError {

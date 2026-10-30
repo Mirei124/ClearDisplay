@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -6,6 +7,8 @@ private final class SimulatedDisplays {
   var uuids: [CGDirectDisplayID: String] = [1: "internal", 3: "external"]
   var enabled: Set<CGDirectDisplayID> = [1, 3]
   var physicalCount: UInt32? = 2
+  var lidClosed: Bool? = false
+  var afterWrite: (() -> Void)?
   var countRead: (() -> UInt32?)?
   var result = HDConnectionOK
   var applyWrite = true
@@ -16,11 +19,13 @@ private final class SimulatedDisplays {
       isSupported: { true }, allIDs: { self.ids },
       isEnabled: { self.enabled.contains($0) }, uuid: { self.uuids[$0] },
       activePhysicalCount: { self.countRead?() ?? self.physicalCount },
+      lidIsClosed: { self.lidClosed },
       setEnabled: { id, enabled in
         self.writes.append((id, enabled))
         if self.result == HDConnectionOK, self.applyWrite {
           if enabled { self.enabled.insert(id) } else { self.enabled.remove(id) }
           self.physicalCount = UInt32(self.enabled.count)
+          self.afterWrite?()
         }
         return self.result
       })
@@ -40,6 +45,7 @@ private final class SimulatedDisplays {
     precondition(condition, message)
   }
 
+  @MainActor
   static func main() async throws {
     let suite = "ClearDisplay.RecoveryTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -163,6 +169,73 @@ private final class SimulatedDisplays {
       }
       check(try await service.recoverBuiltinIfNeeded() == false, "Recheck before enabling")
       check(hardware.writes.isEmpty, "Abort if another screen returned")
+      tests += 1
+    }
+    do {
+      let (hardware, service) = try await scenario()
+      hardware.lidClosed = true
+      hardware.unplugExternal()
+      check(try await service.recoverBuiltinIfNeeded() == false, "Do not enable a closed panel")
+      check(hardware.writes.isEmpty, "Closed lid must defer the write")
+      check(await service.disconnected().count == 1, "Keep the record until the lid opens")
+      // A later wake must be able to recover even after the earlier retries ended.
+      hardware.lidClosed = false
+      hardware.ids = []
+      check(try await service.recoverBuiltinIfNeeded() == false, "Wake topology may not be ready")
+      hardware.ids = [1]
+      check(try await service.recoverBuiltinIfNeeded(), "Recover on a later wake retry")
+      tests += 1
+    }
+    do {
+      let (hardware, service) = try await scenario()
+      hardware.lidClosed = true
+      hardware.enabled.insert(1)
+      check(
+        await service.disconnected().count == 1, "Closed-lid enabled flags must not erase records")
+      hardware.unplugExternal()
+      hardware.enabled.remove(1)
+      hardware.physicalCount = 0
+      hardware.lidClosed = false
+      check(
+        try await service.recoverBuiltinIfNeeded(), "Saved record survives the sleep transition")
+      tests += 1
+    }
+    do {
+      let (hardware, service) = try await scenario()
+      hardware.unplugExternal()
+      hardware.afterWrite = { hardware.lidClosed = true }
+      do {
+        _ = try await service.recoverBuiltinIfNeeded()
+        preconditionFailure("Lid closing during enable must not count as visible recovery")
+      } catch {}
+      check(await service.disconnected().count == 1, "Keep the record if the lid closes again")
+      hardware.afterWrite = nil
+      tests += 1
+    }
+    do {
+      let (hardware, service) = try await scenario()
+      hardware.unplugExternal()
+      hardware.lidClosed = nil
+      check(
+        try await service.recoverBuiltinIfNeeded(),
+        "An unavailable lid sensor must not block recovery")
+      tests += 1
+    }
+    do {
+      let center = NotificationCenter()
+      var events = 0
+      var observer: DisplayWakeObserver? = DisplayWakeObserver(center: center) { events += 1 }
+      for name in [
+        NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
+        NSWorkspace.sessionDidBecomeActiveNotification,
+      ] {
+        center.post(name: name, object: nil)
+      }
+      check(events == 3, "Each wake source must request another recovery check")
+      withExtendedLifetime(observer) {}
+      observer = nil
+      center.post(name: NSWorkspace.didWakeNotification, object: nil)
+      check(events == 3, "Wake observers must be removed on teardown")
       tests += 1
     }
     print("Display recovery: \(tests) scenarios passed (simulated hardware)")
