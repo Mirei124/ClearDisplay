@@ -26,33 +26,13 @@ struct DisplayMenuView: View {
   @State private var primaryListExpanded = false
   @State private var appeared = false
 
-  private var menuContentHeight: CGFloat {
-    var height: CGFloat =
-      160 + CGFloat(controller.displays.count + controller.disconnectedDisplays.count) * 55
-    for display in controller.displays where expandedDisplays.contains(display.stableID) {
-      height += 280
-      if MenuSection.resolution(display.stableID).isVisible(when: expandedSection) {
-        let modes = controller.modesByDisplay[display.id] ?? []
-        let density = modes.first(where: \.isCurrent)?.isHiDPI ?? display.hiDPIEnabled
-        let count = DisplayModeCatalog.desktopResolutions(modes, hiDPI: density).count
-        height += CGFloat(count) * 30
-      }
-      if MenuSection.refresh(display.stableID).isVisible(when: expandedSection) { height += 100 }
-      if MenuSection.rotation(display.stableID).isVisible(when: expandedSection) { height += 125 }
-      if MenuSection.mirror(display.stableID).isVisible(when: expandedSection) {
-        height += CGFloat(controller.displays.count) * 30
-      }
-      if MenuSection.color(display.stableID).isVisible(when: expandedSection) { height += 310 }
-      if MenuSection.profile(display.stableID).isVisible(when: expandedSection) {
-        height += CGFloat(controller.profilesByDisplay[display.id]?.profiles.count ?? 1) * 30
-      }
-    }
-    if !controller.layout.isEmpty {
-      height += arrangementExpanded ? 209 : 64
-      if primaryListExpanded { height += CGFloat(controller.layout.count) * 30 }
-    }
-    if controller.launchAtLoginStatus.reason != nil { height += 22 }
-    return height
+  @State private var contentHeight: CGFloat = 1
+  @State private var chromeHeight: CGFloat = 0
+  @State private var windowHeight: CGFloat = 0
+  @State private var availableHeight: CGFloat = 600
+
+  private var scrollHeight: CGFloat {
+    min(contentHeight, max(1, availableHeight - chromeHeight))
   }
 
   var body: some View {
@@ -90,12 +70,12 @@ struct DisplayMenuView: View {
           globalControls
         }
         .frame(width: 390)
+        .fixedSize(horizontal: false, vertical: true)
+        .measureMenuHeight("content")
       }
-      .scrollIndicators(.hidden)
-      .frame(
-        height: min(menuContentHeight, max(400, (NSScreen.main?.visibleFrame.height ?? 900) - 140))
-      )
-      .animation(.easeInOut(duration: 0.18), value: menuContentHeight)
+      .scrollIndicators(.automatic)
+      .frame(height: scrollHeight)
+      .measureMenuHeight("viewport")
 
       if let error = controller.errorMessage {
         Divider()
@@ -115,6 +95,20 @@ struct DisplayMenuView: View {
       .padding(.vertical, 10)
     }
     .frame(width: 390)
+    .fixedSize(horizontal: false, vertical: true)
+    .measureMenuHeight("window")
+    .onPreferenceChange(MenuHeightKey.self) { sizes in
+      if let content = sizes["content"] { contentHeight = ceil(content) }
+      if let total = sizes["window"], let viewport = sizes["viewport"] {
+        chromeHeight = ceil(total - viewport)
+        windowHeight = ceil(total)
+      }
+    }
+    .background {
+      MenuWindowSizing(height: windowHeight) { availableHeight = $0 }
+    }
+    // Window sizing must settle in one transaction, rather than follow intermediate animation sizes.
+    .transaction { $0.animation = nil }
     .opacity(appeared ? 1 : 0)
     .offset(y: appeared || reduceMotion ? 0 : -6)
     .task {
