@@ -20,3 +20,9 @@ swiftc -target arm64-apple-macos14.0 \
   -framework CoreGraphics -framework ColorSync -framework IOKit -framework AppKit \
   -o "${app_root}/build/check/DisplayRecoveryTests"
 "${app_root}/build/check/DisplayRecoveryTests"
+swiftc -target arm64-apple-macos14.0 \
+  -module-cache-path "${app_root}/build/check/ModuleCache" \
+  "${app_root}/DisplayCore/DDCRequestScheduler.swift" \
+  "${app_root}/Tests/DDCRequestSchedulerTests.swift" \
+  -o "${app_root}/build/check/DDCRequestSchedulerTests"
+"${app_root}/build/check/DDCRequestSchedulerTests"

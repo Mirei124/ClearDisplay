@@ -651,7 +651,7 @@ struct DisplayMenuView: View {
         || controller.isBusy,
       onEditingChanged: { controller.brightnessEditingChanged(for: display.id, editing: $0) }
     )
-    .help(status?.unavailableReason ?? "调节显示器亮度")
+    .help(status?.unavailableReason ?? (display.isBuiltin ? "调节显示器亮度" : "松开滑块后应用显示器亮度"))
   }
 
   private func resolutionDetail(

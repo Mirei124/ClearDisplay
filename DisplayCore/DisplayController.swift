@@ -51,6 +51,10 @@ final class DisplayController: ObservableObject {
   private let softwareTransfer = DisplaySoftwareTransferService()
   private let nightShiftService = DisplayNightShiftService()
   private var terminationObserver: NSObjectProtocol?
+  private var brightnessReadsInFlight: Set<String> = []
+  private var colorReadsInFlight: Set<String> = []
+  private var brightnessWorkerTokens: [CGDirectDisplayID: UUID] = [:]
+  private var brightnessCommitAfter: [CGDirectDisplayID: TimeInterval] = [:]
   private var editingBrightness: Set<CGDirectDisplayID> = []
   private var pendingBrightness: [CGDirectDisplayID: Double] = [:]
   private var brightnessTasks: [CGDirectDisplayID: Task<Void, Never>] = [:]
@@ -212,6 +216,8 @@ final class DisplayController: ObservableObject {
         brightnessTasks[id]?.cancel()
         brightnessTasks.removeValue(forKey: id)
         brightnessWorkerIDs.removeValue(forKey: id)
+        brightnessWorkerTokens.removeValue(forKey: id)
+        brightnessCommitAfter.removeValue(forKey: id)
         pendingBrightness.removeValue(forKey: id)
       }
     }
@@ -387,7 +393,9 @@ final class DisplayController: ObservableObject {
       }
       profilesByDisplay[id] = profile
     }
-    guard displays.contains(where: { $0.id == id && !$0.isBuiltin }) else { return }
+    guard displays.contains(where: { $0.id == id && !$0.isBuiltin }),
+      colorReadsInFlight.insert(stableID).inserted
+    else { return }
     Task {
       let values = await Task.detached(priority: .utility) {
         (
@@ -395,9 +403,10 @@ final class DisplayController: ObservableObject {
           DisplayImageAdjustmentService.hardwareTemperature(for: id)
         )
       }.value
-      guard generation == refreshGeneration,
-        displays.contains(where: { $0.id == id && $0.stableID == stableID })
-      else {
+      colorReadsInFlight.remove(stableID)
+      guard displays.contains(where: { $0.id == id && $0.stableID == stableID }) else { return }
+      guard generation == refreshGeneration else {
+        loadColorControls(for: id)
         return
       }
       contrastByDisplay[id] = values.0
@@ -500,6 +509,8 @@ final class DisplayController: ObservableObject {
     for task in brightnessTasks.values { task.cancel() }
     brightnessTasks.removeAll()
     brightnessWorkerIDs.removeAll()
+    brightnessWorkerTokens.removeAll()
+    brightnessCommitAfter.removeAll()
     pendingBrightness.removeAll()
   }
 
@@ -591,6 +602,8 @@ final class DisplayController: ObservableObject {
     brightnessTasks[id]?.cancel()
     brightnessTasks.removeValue(forKey: id)
     brightnessWorkerIDs.removeValue(forKey: id)
+    brightnessWorkerTokens.removeValue(forKey: id)
+    brightnessCommitAfter.removeValue(forKey: id)
     pendingBrightness.removeValue(forKey: id)
     brightnessDrafts.removeValue(forKey: id)
     busyDisplays.insert(id)
@@ -690,14 +703,20 @@ final class DisplayController: ObservableObject {
 
   func loadBrightness(for id: CGDirectDisplayID) {
     let generation = refreshGeneration
-    guard let stableID = displays.first(where: { $0.id == id })?.stableID else { return }
+    guard brightnessTasks[id] == nil,
+      let stableID = displays.first(where: { $0.id == id })?.stableID,
+      brightnessReadsInFlight.insert(stableID).inserted
+    else { return }
     Task {
       let status = await Task.detached(priority: .utility) {
         DisplayBrightnessService.status(for: id)
       }.value
-      guard generation == refreshGeneration,
-        displays.contains(where: { $0.id == id && $0.stableID == stableID })
-      else {
+      brightnessReadsInFlight.remove(stableID)
+      guard displays.contains(where: { $0.id == id && $0.stableID == stableID }),
+        brightnessTasks[id] == nil
+      else { return }
+      guard generation == refreshGeneration else {
+        loadBrightness(for: id)
         return
       }
       brightnessByDisplay[id] = status
@@ -712,6 +731,9 @@ final class DisplayController: ObservableObject {
   func brightnessEditingChanged(for id: CGDirectDisplayID, editing: Bool) {
     if editing {
       editingBrightness.insert(id)
+      if displays.first(where: { $0.id == id })?.isBuiltin == false {
+        pendingBrightness.removeValue(forKey: id)
+      }
     } else {
       editingBrightness.remove(id)
       brightnessDraftChanged(for: id)
@@ -724,17 +746,37 @@ final class DisplayController: ObservableObject {
       let stableID = displays.first(where: { $0.id == id })?.stableID,
       brightnessByDisplay[id]?.isAdjustable == true
     else { return }
+    // DDC is not a real-time slider transport. Preview drafts during a drag and
+    // commit only after release; built-in brightness keeps live updates.
+    if editingBrightness.contains(id), displays.first(where: { $0.id == id })?.isBuiltin == false {
+      return
+    }
     pendingBrightness[id] = percent
+    brightnessCommitAfter[id] = ProcessInfo.processInfo.systemUptime + 0.25
     guard brightnessTasks[id] == nil else { return }
     errorMessage = nil
     brightnessWorkerIDs[id] = stableID
+    let token = UUID()
+    brightnessWorkerTokens[id] = token
     brightnessTasks[id] = Task { [weak self] in
       brightnessLoop: while let self, !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(40))
-        guard !Task.isCancelled,
-          self.displays.contains(where: { $0.id == id && $0.stableID == stableID }),
-          let next = self.pendingBrightness.removeValue(forKey: id)
+        let builtin = self.displays.first(where: { $0.id == id })?.isBuiltin == true
+        try? await Task.sleep(for: .milliseconds(builtin ? 40 : 250))
+        guard !Task.isCancelled, self.brightnessWorkerTokens[id] == token,
+          let display = self.displays.first(where: { $0.id == id && $0.stableID == stableID })
         else { break }
+        if !display.isBuiltin && self.editingBrightness.contains(id) { continue }
+        if !display.isBuiltin,
+          ProcessInfo.processInfo.systemUptime < (self.brightnessCommitAfter[id] ?? 0)
+        {
+          continue
+        }
+        if self.isBusy || self.busyDisplays.contains(id) { continue }
+        guard let next = self.pendingBrightness.removeValue(forKey: id) else { break }
+        // Mouse-up often repeats the last draft. Do not write an already verified value.
+        if let measured = self.brightnessByDisplay[id]?.percent, abs(measured - next) < 0.5 {
+          continue
+        }
         let result = await Task.detached(priority: .userInitiated) {
           guard displayStableID(id) == stableID else {
             return Result<BrightnessStatus, BrightnessError>.failure(
@@ -742,7 +784,9 @@ final class DisplayController: ObservableObject {
           }
           return DisplayBrightnessService.setPercent(next, for: id)
         }.value
-        guard self.displays.contains(where: { $0.id == id && $0.stableID == stableID }) else {
+        guard !Task.isCancelled, self.brightnessWorkerTokens[id] == token,
+          self.displays.contains(where: { $0.id == id && $0.stableID == stableID })
+        else {
           break
         }
         switch result {
@@ -759,12 +803,33 @@ final class DisplayController: ObservableObject {
           self.brightnessDrafts.removeValue(forKey: id)
           self.pendingBrightness.removeValue(forKey: id)
           self.editingBrightness.remove(id)
+          // One read-only recovery check after an invalid reply. Never replay the failed
+          // draft. Transport errors are blocked by the shared scheduler's cooldown.
+          try? await Task.sleep(for: .milliseconds(600))
+          guard !Task.isCancelled, self.brightnessWorkerTokens[id] == token,
+            self.displays.contains(where: { $0.id == id && $0.stableID == stableID })
+          else {
+            break brightnessLoop
+          }
+          let recovered = await Task.detached(priority: .utility) {
+            guard displayStableID(id) == stableID else { return Optional<BrightnessStatus>.none }
+            return DisplayBrightnessService.status(for: id)
+          }.value
+          if !Task.isCancelled, self.brightnessWorkerTokens[id] == token,
+            self.displays.contains(where: { $0.id == id && $0.stableID == stableID }),
+            let recovered, recovered.isAdjustable
+          {
+            self.brightnessByDisplay[id] = recovered
+            self.brightnessDrafts[id] = recovered.percent
+          }
           break brightnessLoop
         }
       }
-      if self?.brightnessWorkerIDs[id] == stableID {
+      if self?.brightnessWorkerTokens[id] == token {
         self?.brightnessTasks.removeValue(forKey: id)
         self?.brightnessWorkerIDs.removeValue(forKey: id)
+        self?.brightnessWorkerTokens.removeValue(forKey: id)
+        self?.brightnessCommitAfter.removeValue(forKey: id)
         if self?.pendingBrightness[id] != nil { self?.brightnessDraftChanged(for: id) }
       }
     }
