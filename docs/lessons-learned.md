@@ -32,6 +32,7 @@ This is a record of issues found while building and testing ClearDisplay on one 
 
 ## Verification and scope
 
+- An application bundle with an empty Resources directory and no `CFBundleIconFile` used a generic app icon even though the repository contained a DMG volume icon. Keep the app ICNS distinct from the volume icon, copy it in the shared build script for Debug and Release, and verify the bundled resource and plist reference together.
 - `./check.sh` checks formatting, C warnings, plist validity, and an arm64 Debug build. It does **not** exercise display mutations or verify a menu bar popup's resizing.
 - The Debug preview reuses the production view but runs in a titled `NSWindow`; it can confirm content and click targets, while the real `MenuBarExtra` must be checked for popup sizing and animation.
 - The measured-height implementation was checked in both hosts on 2026-11-17. See [menu height verification](menu-height-verification.md) for measured window sizes, scrolling screenshots, and untested hardware scenarios.

@@ -1,0 +1,4 @@
+Tool: built-in image_gen
+Reference: ClearDisplay-icon-glass-bold.png
+Final prompt:
+Make exactly one localized change to this approved ClearDisplay app icon: fill ONLY the interior of the monitor screen, the rounded rectangular area enclosed by the thick white monitor outline, with a uniform opaque light neutral gray (approximately #E0E2E5). The interior should be visibly light gray rather than blue, without wallpaper, patterns, or blue glass showing through. Preserve the white thick outline, white stem and foot, their geometry, thickness, size and position exactly. Preserve the entire pale blue frosted Liquid Glass background tile, its blurred color fields, luminous rim, shadows, outer background, margins, lighting and square canvas unchanged. No other edits, no text, no added elements. Keep image opaque.

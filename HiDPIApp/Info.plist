@@ -5,6 +5,7 @@
     <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
     <key>CFBundleExecutable</key><string>ClearDisplay</string>
     <key>CFBundleIdentifier</key><string>app.cleardisplay.mac</string>
+    <key>CFBundleIconFile</key><string>ClearDisplay.icns</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>ClearDisplay</string>
     <key>CFBundlePackageType</key><string>APPL</string>

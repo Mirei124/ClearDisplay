@@ -32,5 +32,6 @@ swiftc -parse-as-library -target arm64-apple-macos14.0 -sdk "${sdk_path}" \
   -framework AppKit -framework CoreGraphics -framework IOKit -framework SwiftUI \
   -o "${app_bundle}/Contents/MacOS/ClearDisplay"
 cp "${app_root}/HiDPIApp/Info.plist" "${app_bundle}/Contents/Info.plist"
+cp "${app_root}/assets/ClearDisplay.icns" "${app_bundle}/Contents/Resources/ClearDisplay.icns"
 plutil -lint "${app_bundle}/Contents/Info.plist"
 print "Built ${app_bundle} (${configuration})"
